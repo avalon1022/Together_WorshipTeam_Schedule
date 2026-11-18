@@ -1,0 +1,18 @@
+{
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      { "source": "/api/**", "function": { "functionId": "api", "region": "asia-northeast3" } },
+      { "source": "/auth/**", "function": { "functionId": "api", "region": "asia-northeast3" } }
+    ],
+    "headers": [
+      { "source": "**/*.html", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+      { "source": "/", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+    ]
+  },
+  "functions": [
+    { "source": "functions", "codebase": "default", "runtime": "nodejs20", "ignore": ["node_modules", ".git", "*.log"] }
+  ],
+  "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" }
+}

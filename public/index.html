@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>주일 예배팀 스케줄</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+/* 밝은 화면: 회청색 배경 + 밝은 카드 / 다크 모드: 다크 세이지 */
+:root{
+  --bg:#D3D9DE; --surface:#F5F7F8; --ink:#1D262E; --muted:#55626C; --line:#C2CAD1;
+  --accent:#3D576A; --accent-ink:#ffffff; --accent-soft:#DDE5EA; --gold:#866833; --gold-soft:#ECE3D2;
+  --warn:#B2452C; --warn-soft:#F6E2DC;
+  --f-display:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  --f-body:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#1D221F; --surface:#262D28; --ink:#E5EAE4; --muted:#9BA69C; --line:#36403A;
+  --accent:#A0BEA6; --accent-ink:#131913; --accent-soft:#2D3A30; --gold:#D4B27B; --gold-soft:#3A3227;
+  --warn:#E8907A; --warn-soft:#40271F; color-scheme:dark;}}
+h1,h2,.month b,td.date,.catname,th.grp,.editor h3,.daycard .d,.day .d,.empty b{font-weight:700;letter-spacing:-0.02em}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.55}
+.wrap{max-width:980px;margin:0 auto;padding:28px 16px 64px}
+header{display:flex;flex-wrap:wrap;gap:16px;align-items:end;justify-content:space-between;margin-bottom:20px}
+h1{font-family:var(--f-display);font-weight:700;font-size:30px;line-height:1.2;margin:0}
+.sub{color:var(--muted);margin:6px 0 0;font-size:14px}
+.month{display:flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:4px}
+.month b{font-family:var(--f-display);font-size:18px;min-width:118px;text-align:center}
+.icon-btn{border:0;background:transparent;color:var(--ink);width:36px;height:36px;border-radius:8px;font-size:18px;cursor:pointer}
+.icon-btn:hover{background:var(--accent-soft)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:22px;overflow-x:auto}
+.tab{border:0;background:none;color:var(--muted);font:inherit;font-weight:500;padding:10px 14px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.banner{background:var(--gold-soft);border-radius:10px;padding:10px 14px;margin-bottom:18px;font-size:14px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:20px}
+@media (max-width:720px){.grid2{grid-template-columns:minmax(0,1fr)}}
+.field{display:flex;flex-direction:column;gap:6px;margin-bottom:18px}
+.label{font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--muted)}
+input[type=text],input[type=number],input[type=password],select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 11px;width:100%}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font:inherit;font-size:14px;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:999px;padding:7px 14px;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.days{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px}
+.day{font:inherit;text-align:left;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:10px;padding:12px;cursor:pointer;display:flex;flex-direction:column;gap:2px}
+.day .d{font-family:var(--f-display);font-size:22px;font-weight:700;line-height:1}
+.day .w{font-size:12px;color:var(--muted)}
+.day[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent)}
+.day[aria-pressed="true"] .w{color:var(--accent)}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.btn{font:inherit;font-weight:600;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);border-radius:8px;padding:10px 18px;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--accent)}
+.btn.danger{background:transparent;color:var(--warn);border-color:var(--warn)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.hint{font-size:13px;color:var(--muted)}
+.toast{font-size:14px;color:var(--accent);font-weight:500}
+.toast.err{color:var(--warn)}
+.tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:520px}
+th,td{padding:12px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+tr:last-child td{border-bottom:0}
+thead th{font-size:12px;letter-spacing:.06em;color:var(--muted);font-weight:600;background:var(--bg)}
+td.date{font-family:var(--f-display);font-weight:700;font-size:17px;white-space:nowrap}
+td.date small{display:block;font-family:var(--f-body);font-weight:400;font-size:12px;color:var(--muted)}
+.name{display:inline-block;margin:0 6px 4px 0}
+.name,.gap,th,td.svcl,td.date{white-space:nowrap}
+td{min-width:64px}
+.gap{display:inline-block;background:var(--warn-soft);color:var(--warn);border-radius:6px;padding:1px 8px;font-size:13px;font-weight:500}
+.status{display:inline-flex;align-items:center;font-size:13px;font-weight:600;border-radius:999px;padding:4px 12px}
+.status.draft{background:var(--gold-soft);color:var(--gold)}
+.status.final{background:var(--accent-soft);color:var(--accent)}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:14px}
+.tally{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-top:4px}
+.tally div{display:flex;justify-content:space-between;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:14px}
+.tally span{color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
+.tally b{white-space:nowrap}
+.tally.wide{grid-template-columns:repeat(auto-fill,minmax(270px,1fr))}
+h2{font-family:var(--f-display);font-size:20px;margin:26px 0 12px}
+.panel h2{margin-top:0}
+.list{display:flex;flex-direction:column;gap:8px}
+.item{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.item .meta{font-size:13px;color:var(--muted)}
+.roleedit{display:grid;grid-template-columns:minmax(0,1fr) 84px auto;gap:8px;align-items:center}
+.empty{text-align:center;padding:36px 16px;color:var(--muted)}
+.empty b{display:block;font-family:var(--f-display);font-size:19px;color:var(--ink);margin-bottom:6px}
+textarea{width:100%;font:inherit;margin-top:10px}
+.chip:disabled{cursor:default;opacity:.85}
+.chips.sm .chip{font-size:13px;padding:4px 11px}
+.cell{font:inherit;color:inherit;text-align:left;background:none;border:1px dashed transparent;border-radius:8px;padding:4px 6px;margin:-5px -7px;cursor:pointer;width:calc(100% + 14px);min-height:32px}
+.cell:hover,.cell.on{border-color:var(--accent);background:var(--accent-soft)}
+.tag{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--gold);background:var(--gold-soft);border-radius:4px;padding:0 5px;margin-left:2px;vertical-align:1px}
+.editor{margin-bottom:14px;border-color:var(--accent)}
+.editor h3{font-family:var(--f-display);font-size:18px;margin:0 0 12px}
+.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:14px}
+.warn{color:var(--warn);font-size:13px;margin:0 0 12px}
+.vol{flex-direction:column;align-items:stretch}
+.vhead{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;align-items:baseline}
+.check{display:inline-flex;gap:6px;align-items:center;font-size:14px;cursor:pointer}
+.check input{width:16px;height:16px;accent-color:var(--accent)}
+.lockmark{font-size:12px;font-weight:600;color:var(--accent);background:var(--accent-soft);border-radius:4px;padding:1px 6px;margin-left:6px}
+.newvol{border:1px dashed var(--line);border-radius:10px;padding:12px;margin-bottom:14px;display:flex;flex-direction:column;gap:10px}
+.daycard{border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.daycard .d{font-family:var(--f-display);font-size:20px;font-weight:700;line-height:1}
+.svcs{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.svc{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:7px 4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:0;line-height:1.3}
+.svc small{font-size:11px;color:var(--muted)}
+.svc[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.svc[aria-pressed="true"] small{color:var(--accent-ink);opacity:.85}
+.svc:disabled{opacity:.4;cursor:not-allowed}
+.days.cards{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.catblock{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+.catname{font-family:var(--f-display);font-weight:700;font-size:16px}
+th.grp{text-align:center;font-family:var(--f-display);font-size:14px;letter-spacing:0;color:var(--ink);border-left:1px solid var(--line)}
+td.svcl{font-size:13px;color:var(--muted);white-space:nowrap}
+tr.svc2 td{border-bottom-width:1px}
+tr.svc1 td:not(.date){border-bottom:1px dashed var(--line)}
+td.first{border-left:1px solid var(--line)}
+.statuses{display:flex;flex-wrap:wrap;gap:6px}
+.catrow{display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--line);padding-top:8px}
+.catrow .row{gap:12px}
+select.small{width:auto;padding:5px 8px;font-size:13px}
+.loginbox{max-width:520px;display:flex;flex-direction:column;gap:12px}
+.loginbox h2,.loginbox p{margin:0}
+.ver{font-size:12px;opacity:.75}
+.kakao{display:inline-flex;align-items:center;justify-content:center;gap:8px;align-self:flex-start;min-width:240px;
+  background:#FEE500;color:rgba(0,0,0,.85);font-weight:600;font-size:15px;text-decoration:none;border-radius:10px;padding:12px 20px}
+.kakao:hover{filter:brightness(.97)}
+.kakao:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.whoami{justify-content:space-between;margin-bottom:12px;font-size:14px;color:var(--muted)}
+.whoami b{color:var(--ink)}
+.btn.small{padding:6px 12px;font-size:13px}
+.linkbtn{font:inherit;font-size:13px;color:var(--accent);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline}
+.whois select{max-width:420px}
+.evlist{display:flex;flex-direction:column;gap:10px}
+.evcard{border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.evcard.off{opacity:.6}
+.evhead{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}
+.evhead b{font-family:var(--f-display);font-size:16px}
+.evslots{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px}
+td.svcl small{display:block;font-size:11px}
+tr.bmid td:not(.date){border-bottom:1px dashed var(--line)}
+tr.evrow td.date small{color:var(--accent)}
+.na{color:var(--muted);opacity:.6}
+.evform .evgrid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:10px}
+@media (max-width:520px){.evform .evgrid{grid-template-columns:minmax(0,1fr)}}
+.evform .field{margin-bottom:0}
+input[type=date],input[type=time]{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.slotrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto auto;gap:6px;align-items:center;margin-bottom:6px}
+.slotrow input[type=text]{min-width:0}
+@media (max-width:520px){.slotrow{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto}.slotrow input[type=text]{grid-column:1/-1}
+  .slotrow input[type=time]{min-width:0;width:100%}}
+.calbox{margin:16px 0 4px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between}
+.calbox>div:first-child{min-width:0;flex:1 1 280px}
+.calbox p{margin:4px 0 0}
+a.btn{text-decoration:none;display:inline-block}
+.scope{font-size:13px;font-weight:600;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:4px 12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>주일 예배팀 스케줄</h1>
+      <p class="sub">가능한 주일을 체크하면 역할별 순서가 자동으로 정리됩니다.</p>
+    </div>
+    <div class="month" role="group" aria-label="월 선택">
+      <button class="icon-btn" id="prevM" aria-label="이전 달">‹</button>
+      <b id="monthLabel"></b>
+      <button class="icon-btn" id="nextM" aria-label="다음 달">›</button>
+    </div>
+  </header>
+  <div id="banner"></div>
+  <nav class="tabs" role="tablist" id="tabs"></nav>
+  <main id="view"></main>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pad=n=>String(n).padStart(2,"0");
+const SVCS=["1","2"],svcLabel=s=>s+"부";
+
+function monthKeyOf(d){return d.getFullYear()+"-"+pad(d.getMonth()+1)}
+function shiftMonth(key,n){const [y,m]=key.split("-").map(Number);return monthKeyOf(new Date(y,m-1+n,1))}
+function sundays(key){const [y,m]=key.split("-").map(Number);const out=[];const d=new Date(y,m-1,1);
+  while(d.getDay()!==0)d.setDate(d.getDate()+1);
+  while(d.getMonth()===m-1){out.push(d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()));d.setDate(d.getDate()+7)}return out}
+const mLabel=k=>{const [y,m]=k.split("-");return `${y}년 ${+m}월`};
+const dLabel=s=>{const [,m,d]=s.split("-");return `${+m}월 ${+d}일`};
+const jo=(w,a,b)=>{w=String(w);const c=w.charCodeAt(w.length-1);return w+((c>=0xAC00&&c<=0xD7A3&&(c-0xAC00)%28)?a:b)};
+const toggle=(arr,x)=>arr.includes(x)?arr.filter(y=>y!==x):[...arr,x];
+
+// 서버(/api) 호출. 로그인 쿠키는 브라우저가 자동으로 붙입니다.
+async function api(path,body){
+  const opt=body===undefined?{credentials:"same-origin"}
+    :{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","X-Requested-With":"fetch"},body:JSON.stringify(body)};
+  let res;
+  try{res=await fetch(path,opt)}catch(e){throw new Error("서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요.")}
+  const j=await res.json().catch(()=>({}));
+  if(!res.ok){const e=new Error(j.error||`서버 오류가 났어요 (${res.status})`);e.code=j.code;throw e}
+  return j;
+}
+
+const blankForm=()=>({id:"",name:"",roles:[],dates:[],touched:[],lockedCats:[],svcLock:{}});
+const formFrom=v=>({id:v.id,name:v.name,roles:[...v.roles],dates:[...(v.dates||[])],touched:[],lockedCats:[...v.lockedCats],svcLock:{...v.svcLock}});
+const blankNew=()=>({name:"",roles:[],lockedCats:[],svcLock:{}});
+const state={month:shiftMonth(monthKeyOf(new Date()),1),view:null,loading:true,error:"",loginMsg:"",formOwner:"",
+  tab:"input",form:blankForm(),filter:"전체",editCell:null,volDraft:{},newVol:blankNew(),roleDraft:{},
+  toast:"",toastErr:false,busy:false,confirmDel:null,confirmReset:null,confirmUnlink:null,
+  linkPick:"",newReg:false,proxyId:"",evDraft:null,confirmEvDel:null,adminDraft:{}};
+const V=()=>state.view;
+const isAdmin=()=>!!(V()&&V().admin);
+const myCats=()=>isAdmin()?V().admin.cats:[];
+const vol=id=>((V()&&V().vols)||[]).find(v=>v.id===id);
+const roleCat=name=>((V().roles.find(r=>r.name===name))||{}).cat;
+const catRoles=cat=>V().roles.filter(r=>r.cat===cat);
+const bothOk=cat=>!!(V().cats.find(c=>c.name===cat)||{}).bothServices;
+
+/* ---------- 서버에서 불러오기 ---------- */
+let loadSeq=0;
+async function load(quiet){
+  const seq=++loadSeq;
+  if(!quiet){state.loading=true;render()}
+  try{
+    const v=await api("/api/view?month="+encodeURIComponent(state.month));
+    if(seq!==loadSeq)return;
+    setView(v);state.error="";
+  }catch(e){if(seq!==loadSeq)return;state.error=e.message}
+  state.loading=false;
+  const a=document.activeElement;
+  if(quiet&&(state.editCell||(a&&a.matches("input,select"))))return;
+  render();
+}
+function setView(v){state.view=v;state.volDraft={};
+  if(state.filter!=="전체"&&!v.cats.some(c=>c.name===state.filter))state.filter="전체";
+  if(state.proxyId){if(v.admin)loadProxyForm();else{state.proxyId="";state.formOwner="?"}}
+  // 내 정보가 처음 오거나 바뀌면 입력 칸을 그 내용으로 채웁니다.
+  if(!state.proxyId){
+    const mv=v.me&&v.me.vol;
+    if(mv&&state.formOwner!==mv.id){state.form=formFrom(mv);state.formOwner=mv.id}
+    else if(!mv&&state.formOwner){state.form={...blankForm(),name:(v.me&&v.me.nickname)||""};state.formOwner=""}
+  }
+}
+// 관리자 작업: path는 "admin/setFinal" 같은 형태
+async function run(path,body,okMsg){
+  state.busy=true;
+  try{const v=await api("/api/"+path,body);setView(v);state.busy=false;render();
+    if(v.notice)flash(v.notice,true);else if(okMsg)flash(okMsg);return true}
+  catch(e){state.busy=false;if(!authError(e)){render();flash(e.message,true)}return false}
+}
+
+/* ---------- 렌더 ---------- */
+function render(){
+  $("#monthLabel").textContent=mLabel(state.month);
+  const tabs=[["input","가능한 날짜 입력"],["schedule","봉사 스케줄"],["settings","관리"]];
+  $("#tabs").innerHTML=tabs.map(([k,l])=>`<button class="tab" role="tab" data-tab="${k}" aria-selected="${state.tab===k}">${l}</button>`).join("");
+  let b="";
+  if(state.loginMsg)b=state.loginMsg;
+  else if(state.error)b=`불러오지 못했어요: ${state.error}`;
+  else if(state.loading)b="불러오는 중…";
+  $("#banner").innerHTML=b?`<div class="banner">${esc(b)}</div>`:"";
+  if(!V()){
+    if(state.tab==="settings")return renderSettings();
+    $("#view").innerHTML=`<div class="panel empty"><b>${state.error?"불러오지 못했어요":"불러오는 중…"}</b></div>`;return}
+  ({input:renderInput,schedule:renderSchedule,settings:renderSettings})[state.tab]();
+}
+const toastHtml=()=>`<span class="toast${state.toastErr?" err":""}" id="toast">${esc(state.toast)}</span>`;
+const lockMark=t=>`<span class="lockmark">${esc(t)}</span>`;
+function roleBlocks(sel,attr,lockedCats,cats){
+  return (cats||V().cats.map(c=>c.name)).map(cat=>{const locked=(lockedCats||[]).includes(cat);
+    return `<div class="catblock"><span class="catname">${esc(cat)}${locked?lockMark("관리자 지정"):""}</span>
+      <div class="chips${attr==="data-role"?"":" sm"}">${catRoles(cat).map(r=>`<button class="chip" ${attr}="${esc(r.name)}" aria-pressed="${sel.includes(r.name)}" ${locked&&attr==="data-role"?"disabled":""}>${esc(r.name)}</button>`).join("")}</div></div>`}).join("");
+}
+// 봉사자가 체크할 수 있는 부: 맡은 팀 중 하나라도 그 부가 허용되면 체크 가능
+function allowedSvcs(f){
+  const cats=[...new Set(f.roles.map(roleCat).filter(Boolean))];
+  if(!cats.length)return SVCS;
+  return SVCS.filter(s=>cats.some(c=>!f.svcLock[c]||f.svcLock[c]===s));
+}
+
+function kakaoButton(){
+  return `<a class="kakao" href="/auth/kakao/login">
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 3.5c-5.25 0-9.5 3.3-9.5 7.37 0 2.6 1.73 4.88 4.35 6.19l-.9 3.3c-.08.3.26.54.52.37l3.94-2.6c.52.07 1.05.11 1.59.11 5.25 0 9.5-3.3 9.5-7.37S17.25 3.5 12 3.5z"/></svg>
+    카카오 로그인</a>`;
+}
+function proxyBar(){
+  const vs=[...V().vols].sort((a,b)=>a.name.localeCompare(b.name,"ko"));
+  return `<section class="panel whois" style="margin-bottom:16px">
+    <label class="label" for="proxyWho">관리자 · 다른 봉사자 대신 입력</label>
+    <select id="proxyWho"><option value="">— 내 일정 입력 (카카오 로그인) —</option>${vs.map(v=>`<option value="${esc(v.id)}" ${v.id===state.proxyId?"selected":""}>${esc(v.name)}${v.linked?"":" (카카오 미연결)"}</option>`).join("")}</select>
+    <span class="hint">카카오 계정이 없거나 입력을 어려워하는 분의 가능한 예배를 대신 체크할 수 있어요.</span></section>`;
+}
+function datesHtml(f){
+  const days=sundays(state.month),allowed=allowedSvcs(f);
+  const lockNotes=Object.keys(f.svcLock).filter(c=>f.svcLock[c]&&f.roles.some(r=>roleCat(r)===c)).map(c=>`${jo(c,"은","는")} ${svcLabel(f.svcLock[c])}로 고정돼 있어요.`);
+  return `<div class="field"><span class="label">${esc(mLabel(state.month))} 중 봉사 가능한 예배</span>
+    <div class="days cards">${days.map(d=>`<div class="daycard"><span class="d">${+d.slice(8)}일</span><div class="svcs">${SVCS.map(s=>{
+      const k=d+"|"+s,on=f.dates.includes(k),dis=!allowed.includes(s);
+      return `<button class="svc" data-day="${k}" aria-pressed="${on}" ${dis?"disabled":""}>${svcLabel(s)}<small>${(V().dayCounts||{})[k]||0}명 가능</small></button>`}).join("")}</div></div>`).join("")}</div>
+    ${lockNotes.map(n=>`<span class="hint">${esc(n)}</span>`).join("")}
+    <span class="hint">다른 달은 위의 ‹ › 로 이동해서 이어서 체크하면 함께 저장돼요.</span></div>
+  ${eventsHtml(f)}`;
+}
+function eventsHtml(f){
+  const evs=V().events||[];if(!evs.length)return "";
+  const myTeams=[...new Set(f.roles.map(roleCat).filter(Boolean))];
+  return `<div class="field"><span class="label">${esc(mLabel(state.month))} 특별 일정</span>
+    <div class="evlist">${evs.map(e=>{const mine=!myTeams.length||e.teams.some(t=>myTeams.includes(t));
+      return `<div class="evcard${mine?"":" off"}">
+        <div class="evhead"><b>${esc(e.name)}</b><span class="meta">${+e.date.slice(5,7)}월 ${+e.date.slice(8)}일 (${dayName(e.date)}) · ${esc(e.teams.join("·"))}</span></div>
+        <div class="evslots">${e.slots.map(sl=>{const k=e.date+"|e"+e.id+"_"+sl.k,on=f.dates.includes(k);
+          return `<button class="svc" data-day="${k}" aria-pressed="${on}" ${mine?"":"disabled"}>${esc(sl.label)}<small>${esc(tRange(sl.start,sl.end))} · ${(V().dayCounts||{})[k]||0}명 가능</small></button>`}).join("")}</div>
+        ${mine?"":`<span class="hint">${esc(e.teams.join("·"))} 봉사자만 체크할 수 있어요.</span>`}</div>`}).join("")}</div></div>`;
+}
+
+function renderInput(){
+  const me=V().me,f=state.form;
+  const top=isAdmin()?proxyBar():"";
+  const put=h=>{$("#view").innerHTML=top+h};
+
+  // 관리자가 다른 봉사자 대신 입력
+  if(isAdmin()&&state.proxyId){
+    const v=vol(state.proxyId);
+    if(!v){state.proxyId="";return renderInput()}
+    return put(`<div class="grid2">
+      <section class="panel"><h2>${esc(v.name)}</h2>
+        <p class="meta">역할: ${esc(v.roles.join(", ")||"없음")}</p>
+        <p class="hint">관리자가 대신 입력하는 중이에요. 역할은 관리 탭에서 바꿀 수 있어요. 저장하면 이 달의 가능한 예배만 바뀝니다.</p></section>
+      <section class="panel">${datesHtml(f)}
+        <div class="row"><button class="btn" id="proxySave" ${state.busy?"disabled":""}>${state.busy?"저장 중…":`${esc(v.name)}님 일정 저장`}</button>${toastHtml()}</div></section></div>`);
+  }
+  if(!me){
+    if(!V().kakaoReady)return put(`<section class="panel loginbox"><h2>카카오 로그인 설정이 필요해요</h2>
+      <p>관리자가 <b>functions/.env</b>의 <b>KAKAO_REST_API_KEY</b>를 넣고 다시 배포하면, 이곳에 ‘카카오 로그인’ 버튼이 생겨요.</p></section>`);
+    return put(`<section class="panel loginbox">
+      <h2>카카오로 로그인하고 일정 입력하기</h2>
+      <p>내 가능한 예배를 입력하거나 고치려면 카카오 계정으로 로그인해 주세요. 스케줄 보기는 로그인 없이 할 수 있어요.</p>
+      ${kakaoButton()}
+      <p class="hint">카카오 회원번호만 확인하고, 카카오톡 메시지나 친구 목록에는 접근하지 않아요.</p></section>`);
+  }
+  const A={me:me.vol,nick:me.nickname};
+  const who=`<div class="row whoami"><span>카카오로 로그인됨${A.me?` · <b>${esc(A.me.name)}</b>님`:A.nick?` · ${esc(A.nick)}`:""}${me.admin?` <span class="scope">${me.admin.all?"전체 관리자":esc(me.admin.cats.join("·"))+" 담당"}</span>`:""}</span><button class="btn ghost small" id="kakaoLogout">로그아웃</button></div>`;
+
+  // 처음 로그인: 목록의 내 이름과 연결하거나 새로 등록
+  if(A.me===null&&!state.newReg){
+    const free=[...V().vols].filter(v=>!v.linked).sort((a,b)=>a.name.localeCompare(b.name,"ko"));
+    const pick=vol(state.linkPick);
+    return put(`${who}<div class="grid2">
+      <section class="panel"><h2>목록에 내 이름이 있어요</h2>
+        <p class="hint">관리자가 미리 등록해 둔 이름이 있으면 골라서 내 카카오 계정과 연결해 주세요.</p>
+        <div class="field"><label class="label" for="linkWho">내 이름</label>
+          <select id="linkWho"><option value="">— 이름 선택 —</option>${free.map(v=>`<option value="${esc(v.id)}" ${v.id===state.linkPick?"selected":""}>${esc(v.name)}</option>`).join("")}</select></div>
+        <p class="hint">다른 사람의 이름을 고르지 않도록 주의해 주세요. 잘못 연결했다면 관리자가 해제할 수 있어요.</p>
+        <div class="row"><button class="btn" id="linkSave" ${!pick||state.busy?"disabled":""}>${state.busy?"연결 중…":"내 이름과 연결"}</button>${toastHtml()}</div></section>
+      <section class="panel"><h2>처음 등록해요</h2>
+        <p class="hint">목록에 내 이름이 없으면 새로 등록해 주세요.</p>
+        <button class="btn ghost" id="newReg">새로 등록하기</button></section></div>`);
+  }
+
+  return put(`${who}<div class="grid2">
+    <section class="panel">
+      ${A.me?"":`<p class="hint"><button class="linkbtn" id="backLink">← 목록에서 내 이름 찾기</button></p>`}
+      <div class="field"><label class="label" for="nm">이름</label>
+        <input type="text" id="nm" maxlength="20" placeholder="예: 김은혜" value="${esc(f.name)}"></div>
+      <div class="field"><span class="label">맡을 수 있는 역할</span>
+        ${roleBlocks(f.roles,"data-role",f.lockedCats)}
+        ${f.lockedCats.length?`<span class="hint">‘관리자 지정’ 팀의 역할은 관리자에게 말씀해 바꿔 주세요.</span>`:""}</div>
+    </section>
+    <section class="panel">${datesHtml(f)}
+      <div class="row">
+        <button class="btn" id="save" ${state.busy?"disabled":""}>${state.busy?"저장 중…":A.me?"수정 내용 저장":"등록하고 저장"}</button>
+        ${toastHtml()}
+      </div>
+    </section>
+  </div>`);
+}
+
+function cellPeople(slots,d,s,role){return ((slots[d]||{})[s]||{})[role]||[]}
+const WD=["일","월","화","수","목","금","토"];
+const dayName=d=>WD[new Date(d+"T00:00:00").getDay()];
+const tRange=(a,b)=>a?(b?`${a}~${b}`:a):"";
+// 이 달의 배정 단위: 주일(1부·2부) 묶음과 이벤트 묶음
+function blocks(){
+  const out=sundays(state.month).map(d=>({d,sunday:true,title:"주일",group:"sun",teams:null,
+    occ:SVCS.map(s=>({d,s,label:svcLabel(s),time:"",sunday:true,group:"sun"}))}));
+  (V().events||[]).forEach(e=>out.push({d:e.date,sunday:false,title:e.name,group:"e"+e.id,teams:e.teams,event:e,
+    occ:e.slots.map(sl=>({d:e.date,s:"e"+e.id+"_"+sl.k,label:sl.label,time:tRange(sl.start,sl.end),sunday:false,group:"e"+e.id,teams:e.teams}))}));
+  return out.sort((a,b)=>a.d.localeCompare(b.d)||(a.sunday===b.sunday?0:a.sunday?-1:1));
+}
+function occInfo(d,s){for(const b of blocks())for(const o of b.occ)if(o.d===d&&o.s===s)return Object.assign({title:b.title},o);return null}
+function occName(d,s){const o=occInfo(d,s);if(!o)return "";return o.sunday?o.label:`${o.title} ${o.label}`}
+function renderEditor(slots){
+  const ec=state.editCell;if(!ec)return "";
+  const role=V().roles.find(r=>r.name===ec.role);if(!role)return "";
+  const info=occInfo(ec.d,ec.s);if(!info)return "";
+  const cat=role.cat,final=V().schedule.finalCats.includes(cat);
+  const others=blocks().find(b=>b.group===info.group&&b.d===ec.d).occ.filter(o=>o.s!==ec.s);
+  const sameSvc={},otherSvc={};
+  for(const r in ((slots[ec.d]||{})[ec.s]||{}))if(r!==ec.role)cellPeople(slots,ec.d,ec.s,r).forEach(p=>{sameSvc[p.id]=r});
+  others.forEach(o=>{for(const r in ((slots[ec.d]||{})[o.s]||{}))cellPeople(slots,ec.d,o.s,r).forEach(p=>{otherSvc[p.id]={r,label:o.label}})});
+  const avail=v=>v.dates.includes(ec.d+"|"+ec.s)&&(!info.sunday||!v.svcLock[cat]||v.svcLock[cat]===ec.s);
+  const where=info.sunday?"이 예배":"이 시간대";
+  const groups=[["가능 · 역할 맞음",v=>v.roles.includes(ec.role)&&avail(v)],
+                [`역할은 맞지만 ${where} 불가`,v=>v.roles.includes(ec.role)&&!avail(v)],
+                ["그 외 봉사자",v=>!v.roles.includes(ec.role)]];
+  const sorted=[...V().vols].sort((a,b)=>a.name.localeCompare(b.name,"ko"));
+  const n=Math.max(role.count,ec.picks.length);
+  const note=v=>sameSvc[v.id]?` (여기서 ${sameSvc[v.id]})`:otherSvc[v.id]?` (${otherSvc[v.id].label} ${otherSvc[v.id].r})`:"";
+  const sel=i=>{const val=ec.picks[i]||"";
+    return `<select id="es${i}" data-slot="${i}" aria-label="${i+1}번째 사람"><option value="">— 비워 두기 —</option>${groups.map(([lab,fn])=>{
+      const vs=sorted.filter(fn);if(!vs.length)return "";
+      return `<optgroup label="${esc(lab)}">${vs.map(v=>`<option value="${esc(v.id)}" ${v.id===val?"selected":""}>${esc(v.name)}${esc(note(v))}</option>`).join("")}</optgroup>`}).join("")}</select>`};
+  const picks=ec.picks.filter(Boolean),warns=[];
+  if(new Set(picks).size!==picks.length)warns.push("같은 사람이 두 번 들어가 있어요.");
+  picks.forEach(id=>{const v=vol(id);if(!v)return;
+    if(sameSvc[id])warns.push(`${v.name}님은 같은 시간에 ${sameSvc[id]}도 맡고 있어요.`);
+    const ot=otherSvc[id];
+    if(ot&&!(bothOk(cat)&&bothOk(roleCat(ot.r))))warns.push(`${v.name}님은 ${ot.label}에 ${jo(ot.r,"을","를")} 맡고 있어요. ${jo(cat,"은","는")} ${info.sunday?"하루에 한 부만":"한 이벤트에서 한 시간대만"} 섬기는 게 원칙이에요.`);
+    if(!avail(v))warns.push(`${v.name}님은 ${where}에 가능하다고 체크하지 않았어요${info.sunday&&v.svcLock[cat]?` (${cat} ${svcLabel(v.svcLock[cat])} 고정)`:""}.`)});
+  const hasOv=!final&&Array.isArray((((V().overrides||{})[ec.d]||{})[ec.s]||{})[ec.role]);
+  return `<section class="panel editor">
+    <h3>${dLabel(ec.d)} ${esc(occName(ec.d,ec.s))} · ${esc(cat)} ${esc(ec.role)} <span class="hint">필요 ${role.count}명</span></h3>
+    <div class="slots">${Array.from({length:n},(_,i)=>sel(i)).join("")}</div>
+    ${warns.map(w=>`<p class="warn">${esc(w)}</p>`).join("")}
+    <div class="row">
+      <button class="btn" id="ecSave" ${state.busy?"disabled":""}>이 칸 저장</button>
+      <button class="btn ghost" id="ecAdd">한 명 더 넣기</button>
+      ${hasOv?`<button class="btn ghost" id="ecAuto">자동 배정으로 되돌리기</button>`:""}
+      <button class="btn ghost" id="ecClose">닫기</button>
+    </div>
+    <p class="hint">${final?`확정된 ${esc(cat)} 스케줄을 직접 고칩니다.`:"수동으로 정한 칸은 그대로 두고, 나머지 칸은 이 결과를 반영해 다시 자동 배정됩니다."}</p>
+  </section>`;
+}
+
+function calHtml(){
+  const c=V().calendar;if(!c)return "";
+  return `<section class="panel calbox">
+    <div><b>구글 캘린더로 받아 보기</b>
+      <p class="hint">확정된 스케줄은 교회 구글 캘린더에 자동으로 올라가요. 한 번 구독하면 휴대폰 캘린더에서 계속 볼 수 있어요.</p></div>
+    <div class="row">
+      <a class="btn" href="${esc(c.google)}" target="_blank" rel="noopener">구글 캘린더에 추가</a>
+      <button class="btn ghost" id="copyIcal">아이폰·기타 캘린더용 주소 복사</button>
+    </div>
+    <div id="icalArea"></div>
+  </section>`;
+}
+
+function renderSchedule(){
+  const days=sundays(state.month),admin=isAdmin(),{slots,finalCats}=V().schedule;
+  if(!V().vols.length){
+    $("#view").innerHTML=`<div class="panel empty"><b>아직 입력한 봉사자가 없어요</b>‘가능한 날짜 입력’ 탭에서 이름과 가능한 예배를 체크하면 이곳에 스케줄이 자동으로 채워집니다.</div>`;return}
+  const cats=state.filter==="전체"?V().cats.map(c=>c.name):[state.filter];
+  const groups=cats.map(c=>({cat:c,roles:catRoles(c)})).filter(g=>g.roles.length);
+  const editable=c=>admin&&myCats().includes(c);
+  const cellHtml=(d,s,r,first,teams)=>{
+    if(teams&&!teams.includes(r.cat))return `<td${first?' class="first"':""}><span class="na">—</span></td>`;
+    const ps=cellPeople(slots,d,s,r.name);const miss=r.count-ps.length;
+    const inner=`${ps.map(p=>`<span class="name">${esc(p.name)}${admin&&p.manual?`<span class="tag">수동</span>`:""}</span>`).join("")}${miss>0?`<span class="gap">${miss}명 부족</span>`:""}`;
+    const cls=first?' class="first"':"";
+    if(!editable(r.cat))return `<td${cls}>${inner}</td>`;
+    const on=state.editCell&&state.editCell.d===d&&state.editCell.s===s&&state.editCell.role===r.name;
+    return `<td${cls}><button class="cell${on?" on":""}" data-cell="${d}" data-svc="${esc(s)}" data-crole="${esc(r.name)}" aria-label="${dLabel(d)} ${esc(occName(d,s))} ${esc(r.name)} 바꾸기">${inner||`<span class="hint">비어 있음</span>`}</button></td>`};
+  const head2=`<tr><th>날짜</th><th>예배</th>${groups.map(g=>g.roles.map((r,i)=>`<th${i===0?' class="first"':""}>${esc(r.name)}</th>`).join("")).join("")}</tr>`;
+  const head1=groups.length>1?`<tr><th></th><th></th>${groups.map(g=>`<th class="grp" colspan="${g.roles.length}">${esc(g.cat)}</th>`).join("")}</tr>`:"";
+  const shown=blocks().filter(b=>b.sunday||b.teams.some(t=>cats.includes(t)));
+  const rows=shown.map(b=>b.occ.map((o,oi)=>`<tr class="${oi===b.occ.length-1?"blast":"bmid"}${b.sunday?"":" evrow"}">${oi===0?`<td class="date" rowspan="${b.occ.length}">${dLabel(b.d)}<small>${b.sunday?"주일":`${esc(b.title)} · ${dayName(b.d)}`}</small></td>`:""}<td class="svcl">${esc(o.label)}${o.time?`<small>${esc(o.time)}</small>`:""}</td>${groups.map(g=>g.roles.map((r,i)=>cellHtml(o.d,o.s,r,i===0,b.teams)).join("")).join("")}</tr>`).join("")).join("");
+  // 이번 달 봉사한 주일 수 (보고 있는 팀 기준)
+  const served={};
+  for(const d of days)for(const s of SVCS)for(const g of groups)for(const r of g.roles)cellPeople(slots,d,s,r.name).forEach(p=>{(served[p.id]=served[p.id]||new Set()).add(d)});
+  const inView=v=>v.roles.some(r=>cats.includes(roleCat(r)));
+  const list=V().vols.filter(v=>inView(v)||served[v.id]).map(v=>{const n=served[v.id]?served[v.id].size:0;
+    return [v.name,n,admin?`${n}회 / 가능 ${v.stats.avail}주 · 지난 2달 ${v.stats.recent}회`:`${n}회`]}).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],"ko"));
+  const finalBtns=admin?cats.filter(c=>myCats().includes(c)).map(c=>finalCats.includes(c)
+    ?`<button class="btn danger" data-unfinal="${esc(c)}">${esc(c)} 확정 해제</button>`
+    :`<button class="btn" data-final="${esc(c)}">${esc(c)} 확정</button>`).join(""):"";
+  $("#view").innerHTML=`
+  <div class="chips" style="margin-bottom:14px">${["전체",...V().cats.map(c=>c.name)].map(c=>`<button class="chip" data-filter="${esc(c)}" aria-pressed="${state.filter===c}">${esc(c)}</button>`).join("")}</div>
+  <div class="toolbar">
+    <div class="statuses">${cats.map(c=>`<span class="status ${finalCats.includes(c)?"final":"draft"}">${esc(c)} · ${finalCats.includes(c)?"확정":"자동 배정 초안"}</span>`).join("")}</div>
+    <div class="row">
+      <button class="btn ghost" id="refresh">새로고침</button>
+      <button class="btn ghost" id="copy">카톡용 텍스트 복사</button>
+      ${finalBtns}
+    </div>
+  </div>
+  ${admin?renderEditor(slots):""}
+  ${admin&&!state.editCell&&cats.some(editable)?`<p class="hint" style="margin:0 0 10px">칸을 누르면 그 칸의 사람을 직접 바꿀 수 있어요.</p>`:""}
+  <div class="tablebox"><table><thead>${head1}${head2}</thead><tbody>${rows}</tbody></table></div>
+  <div id="copyArea"></div>
+  ${toastHtml()}
+  ${calHtml()}
+  ${admin?`<h2>${esc(mLabel(state.month))} 봉사 횟수${state.filter==="전체"?"":` · ${esc(state.filter)}`} <span class="scope">관리자만 보임</span></h2>
+  <div class="tally wide">${list.map(([n,,t])=>`<div><b>${esc(n)}</b><span>${esc(t)}</span></div>`).join("")}</div>
+  <p class="hint" style="margin-top:14px">횟수는 봉사한 주일 수입니다(1부·2부를 모두 섬겨도 1회, 특별 일정은 넣지 않음). 가능·지난 2달 통계는 관리하는 팀 기준입니다. 배정 기준: 사람 구하기 어려운 칸부터 채우고, 이번 달·지난달·전전달에 덜 섬긴 사람과 지난주에 쉬었던 사람을 먼저 배정합니다. 방송실은 하루에 한 부만, 찬양팀은 1부 팀이 2부에도 이어서 섬기도록 배정합니다.</p>`:""}`;
+}
+
+const blankEvent=()=>({id:"",name:"",date:"",teams:myCats().length===1?[...myCats()]:[],slots:[{k:"",label:"",start:"19:00",end:"20:30"}]});
+function eventsAdminHtml(){
+  const list=V().allEvents||[],d=state.evDraft;
+  const slotTxt=e=>e.slots.map(sl=>`${sl.label} ${tRange(sl.start,sl.end)}`).join(", ");
+  return `<section class="panel" style="margin-top:20px" id="evAdmin">
+    <h2>특별 일정 (비정기 이벤트)</h2>
+    <p class="hint">성탄 이브 예배, 수련회처럼 주일이 아닌 일정을 만들면 ‘가능한 날짜 입력’과 스케줄 표에 함께 나오고 자동 배정돼요. 인원은 평소 역할 인원과 같고, 봉사 횟수에는 넣지 않아요.</p>
+    <div class="list" style="margin:12px 0">${list.length?list.map(e=>`<div class="item">
+      <div><b>${esc(e.name)}</b> <span class="meta">${+e.date.slice(5,7)}월 ${+e.date.slice(8)}일 (${dayName(e.date)}) · ${esc(e.teams.join("·"))}</span>
+        <div class="meta">${esc(slotTxt(e))}</div></div>
+      ${e.editable?`<div class="row"><button class="btn ghost small" data-evedit="${esc(e.id)}">수정</button>
+        <button class="btn danger small" data-evdel="${esc(e.id)}">${state.confirmEvDel===e.id?"한 번 더 누르면 삭제":"삭제"}</button></div>`:`<span class="meta">다른 팀 포함 · 전체 관리자만 수정</span>`}
+    </div>`).join(""):`<p class="hint">아직 특별 일정이 없어요.</p>`}</div>
+    ${d?`<div class="newvol evform">
+      <span class="label">${d.id?"특별 일정 수정":"새 특별 일정"}</span>
+      <div class="evgrid">
+        <label class="field"><span class="label">이름</span><input type="text" id="evName" maxlength="30" placeholder="예: 성탄 이브 예배" value="${esc(d.name)}"></label>
+        <label class="field"><span class="label">날짜</span><input type="date" id="evDate" value="${esc(d.date)}"></label>
+      </div>
+      <div class="field"><span class="label">필요한 팀</span><div class="chips">${myCats().map(c=>`<button class="chip" data-evteam="${esc(c)}" aria-pressed="${d.teams.includes(c)}">${esc(c)}</button>`).join("")}</div></div>
+      <div class="field"><span class="label">시간대</span>
+        ${d.slots.map((sl,i)=>`<div class="slotrow">
+          <input type="text" id="evl${i}" data-evs="${i}" data-k="label" maxlength="12" placeholder="${d.slots.length>1?(i+1)+"부":"예배"}" value="${esc(sl.label)}" aria-label="시간대 이름">
+          <input type="time" id="evs${i}" data-evs="${i}" data-k="start" value="${esc(sl.start)}" aria-label="시작">
+          <span class="meta">~</span>
+          <input type="time" id="eve${i}" data-evs="${i}" data-k="end" value="${esc(sl.end)}" aria-label="끝">
+          ${d.slots.length>1?`<button class="icon-btn" data-evsdel="${i}" aria-label="시간대 삭제">×</button>`:""}</div>`).join("")}
+        <div><button class="btn ghost small" id="evAddSlot" ${d.slots.length>=6?"disabled":""}>시간대 추가</button></div></div>
+      <div class="row"><button class="btn" id="evSave" ${state.busy?"disabled":""}>${d.id?"수정 저장":"만들기"}</button><button class="btn ghost" id="evCancel">취소</button></div>
+      <p class="hint">이미 확정된 달에 일정을 추가하거나 바꾸면, 해당 팀을 다시 확정해야 구글 캘린더에 올라가요.</p>
+    </div>`:`<button class="btn" id="evNew">특별 일정 만들기</button>`}
+  </section>`;
+}
+
+// 관리자 지정 (전체 관리자만): 한 번이라도 카카오로 로그인한 계정이 목록에 나옵니다.
+function usersAdminHtml(){
+  const users=V().users||[];
+  const lvl=u=>u.admin?(u.admin.all?"all":"team"):"none";
+  const draft=u=>state.adminDraft[u.kakaoId]||{level:lvl(u),cats:u.admin&&!u.admin.all?[...u.admin.cats]:[]};
+  return `<section class="panel" style="margin-top:20px">
+    <h2>관리자 지정</h2>
+    <p class="hint">카카오로 한 번 이상 로그인한 계정이 나와요. 팀 담당자는 자기 팀의 역할·봉사자·스케줄·특별 일정만 관리할 수 있어요.</p>
+    <div class="list" style="margin-top:12px">${users.map(u=>{const d=draft(u),changed=!!state.adminDraft[u.kakaoId];
+      return `<div class="item">
+        <div><b>${esc(u.volName||u.nickname||"(이름 없음)")}</b>${u.me?` <span class="lockmark">나</span>`:""}
+          <div class="meta">${u.volName&&u.nickname?`카카오 닉네임 ${esc(u.nickname)} · `:""}${u.volName?"봉사자 연결됨":"봉사자 미연결"}</div></div>
+        <div class="row">
+          <select class="small" id="adl-${esc(u.kakaoId)}" data-adlevel="${esc(u.kakaoId)}">
+            <option value="none" ${d.level==="none"?"selected":""}>권한 없음</option>
+            <option value="team" ${d.level==="team"?"selected":""}>팀 담당자</option>
+            <option value="all" ${d.level==="all"?"selected":""}>전체 관리자</option></select>
+          ${d.level==="team"?`<span class="chips sm">${V().cats.map(c=>`<button class="chip" data-adcat="${esc(c.name)}" data-adk="${esc(u.kakaoId)}" aria-pressed="${d.cats.includes(c.name)}">${esc(c.name)}</button>`).join("")}</span>`:""}
+          ${changed?`<button class="btn small" data-adsave="${esc(u.kakaoId)}">저장</button>`:""}
+        </div></div>`}).join("")||`<p class="hint">아직 로그인한 계정이 없어요.</p>`}</div>
+  </section>`;
+}
+
+function renderSettings(){
+  if(!isAdmin()){
+    const me=V().me;
+    let body;
+    if(!me)body=`<h2>관리자 로그인</h2>
+      <p>관리자도 카카오 계정으로 로그인해요. 관리자로 지정된 계정이면 로그인 후 이 탭에서 관리 기능이 열립니다.</p>
+      ${V().kakaoReady?kakaoButton():`<p class="warn">카카오 로그인이 아직 설정되지 않았어요.</p>`}`;
+    else if(V().setupNeeded)body=`<h2>첫 전체 관리자 설정</h2>
+      <p>아직 전체 관리자가 없어요. 배포할 때 정한 <b>관리자 설정 코드</b>를 입력하면 지금 로그인한 계정${me.nickname?`(${esc(me.nickname)})`:""}이 전체 관리자가 됩니다.</p>
+      <div class="field"><label class="label" for="setupCode">관리자 설정 코드</label>
+        <input type="password" id="setupCode" autocomplete="off"></div>
+      <div class="row"><button class="btn" id="setupSave" ${state.busy?"disabled":""}>${state.busy?"확인 중…":"전체 관리자 되기"}</button>${toastHtml()}</div>
+      <p class="hint">한 번 전체 관리자가 생기면 이 코드는 더 이상 쓸 수 없어요. 다른 관리자는 전체 관리자가 지정합니다.</p>`;
+    else body=`<h2>관리자 권한이 없어요</h2>
+      <p>지금 계정${me.nickname?`(${esc(me.nickname)})`:""}은 관리자로 지정돼 있지 않아요. 전체 관리자에게 관리 탭의 ‘관리자 지정’에서 권한을 달라고 요청해 주세요.</p>
+      <div class="row"><button class="btn ghost" id="kakaoLogout">다른 계정으로 로그인</button>${toastHtml()}</div>`;
+    $("#view").innerHTML=`<section class="panel loginbox">${body}</section>`;return}
+  const cats=myCats(),master=!!V().admin.all;
+  cats.forEach(c=>{if(!state.roleDraft[c])state.roleDraft[c]=catRoles(c).map(r=>({name:r.name,count:r.count}))});
+  const nv=state.newVol;
+  const draft=v=>state.volDraft[v.id]||(state.volDraft[v.id]={roles:[...v.roles],lockedCats:[...v.lockedCats],svcLock:{...v.svcLock}});
+  const vols=[...V().vols].sort((a,b)=>a.name.localeCompare(b.name,"ko"));
+  const catControls=(dr,key,c)=>`<div class="catrow"><span class="catname">${esc(c)}</span>
+    <div class="chips sm">${catRoles(c).map(r=>`<button class="chip" data-vrole="${esc(r.name)}" data-vid="${esc(key)}" aria-pressed="${dr.roles.includes(r.name)}">${esc(r.name)}</button>`).join("")}</div>
+    <div class="row"><label class="check"><input type="checkbox" id="lk-${esc(key)}-${esc(c)}" data-vlock="${esc(key)}" data-vcat="${esc(c)}" ${dr.lockedCats.includes(c)?"checked":""}> 역할 고정</label>
+      <label class="check">부 고정 <select class="small" id="sv-${esc(key)}-${esc(c)}" data-vsvc="${esc(key)}" data-vcat="${esc(c)}">
+        <option value="" ${!dr.svcLock[c]?"selected":""}>없음</option>${SVCS.map(s=>`<option value="${s}" ${dr.svcLock[c]===s?"selected":""}>${svcLabel(s)}만</option>`).join("")}</select></label></div></div>`;
+  $("#view").innerHTML=`
+  <div class="row" style="margin-bottom:16px;justify-content:space-between"><span class="scope">${master?"전체 관리자":esc(cats.join("·"))+" 담당자"}${V().me.nickname?` · ${esc(V().me.nickname)}`:""}</span><button class="btn ghost" id="kakaoLogout">로그아웃</button></div>
+  ${toastHtml()}
+  <div class="grid2" style="margin-top:12px">
+    <section class="panel">
+      <h2>역할과 필요 인원</h2>
+      ${cats.map(c=>`<div class="catblock"><span class="catname">${esc(c)}</span>
+        <div class="list">${state.roleDraft[c].map((r,i)=>`<div class="roleedit">
+          <input type="text" id="rn-${esc(c)}-${i}" data-rc="${esc(c)}" data-ri="${i}" data-k="name" value="${esc(r.name)}" aria-label="역할 이름">
+          <input type="number" id="rc-${esc(c)}-${i}" data-rc="${esc(c)}" data-ri="${i}" data-k="count" min="1" max="10" value="${r.count}" aria-label="필요 인원">
+          <button class="icon-btn" data-rdel="${esc(c)}" data-ri="${i}" aria-label="역할 삭제">×</button></div>`).join("")}</div>
+        <div class="row"><button class="btn ghost" data-addrole="${esc(c)}">역할 추가</button><button class="btn" data-saveroles="${esc(c)}">${esc(c)} 역할 저장</button></div></div>`).join("")}
+      <p class="hint">숫자는 1부·2부 각각 필요한 인원입니다. 역할 이름은 팀끼리 겹치지 않게 지어 주세요.</p>
+    </section>
+    <section class="panel">
+      <h2>봉사자 ${V().vols.length}명</h2>
+      <div class="newvol">
+        <span class="label">봉사자 미리 등록</span>
+        <input type="text" id="nvName" maxlength="20" placeholder="이름" value="${esc(nv.name)}">
+        ${cats.map(c=>catControls(nv,"new",c)).join("")}
+        <div class="row"><button class="btn" id="nvSave">등록</button></div>
+      </div>
+      <div class="list">${vols.length?vols.map(v=>{const dr=draft(v);
+        const others=v.roles.filter(r=>!cats.includes(roleCat(r)));
+        return `<div class="item vol">
+        <div class="vhead"><b>${esc(v.name)}</b>
+          <span class="meta">${esc(mLabel(state.month))} 가능 ${v.stats.avail}주 · ${v.linked?"카카오 연결됨":"카카오 미연결"}</span></div>
+        ${others.length?`<span class="meta">다른 팀 역할: ${esc(others.join(", "))}</span>`:""}
+        ${cats.map(c=>catControls(dr,v.id,c)).join("")}
+        <div class="row" style="justify-content:flex-end">
+          <button class="btn ghost" data-vsave="${esc(v.id)}">저장</button>
+          <button class="btn ghost" data-vproxy="${esc(v.id)}">일정 대신 입력</button>
+          ${v.linked?`<button class="btn ghost" data-vunlink="${esc(v.id)}">${state.confirmUnlink===v.id?"한 번 더 누르면 해제":"카카오 연결 해제"}</button>`:""}
+          ${master?`<button class="btn danger" data-vdel="${esc(v.id)}">${state.confirmDel===v.id?"한 번 더 누르면 삭제":"삭제"}</button>`:""}
+        </div></div>`}).join(""):`<p class="hint">아직 봉사자가 없어요.</p>`}</div>
+      <p class="hint" style="margin-top:12px">‘역할 고정’을 켜면 봉사자 본인은 그 팀의 역할을 바꿀 수 없어요. ‘부 고정’을 정하면 그 팀 역할은 고정한 부에만 배정됩니다. ${master?"":"팀에서 빼려면 역할을 모두 해제하고 저장하세요."}</p>
+    </section>
+  </div>
+  ${eventsAdminHtml()}
+  ${master?usersAdminHtml():""}
+  <section class="panel" style="margin-top:20px">
+    <h2>구글 캘린더 연동</h2>
+    ${V().calendarReady
+      ?`<p>교회 구글 캘린더와 연결돼 있어요. 팀 스케줄을 확정하거나 확정된 칸을 고치면 자동으로 반영되고, 확정을 해제하면 그 팀 일정은 지워집니다.</p>`
+      :`<p>아직 캘린더가 연결되지 않았어요. 설치 안내서(README)의 ‘구글 캘린더 연결’ 순서대로 캘린더를 서비스 계정에 공유하고 <b>CALENDAR_ID</b>를 넣은 뒤 다시 배포하면 연결됩니다.</p>`}
+    <p class="hint">예배 시간은 functions/config.js의 SERVICE_TIMES에서 바꿀 수 있어요.</p>
+  </section>`;
+}
+
+/* ---------- 동작 ---------- */
+function flash(msg,err){state.toast=msg;state.toastErr=!!err;const t=$("#toast");if(t){t.textContent=msg;t.className="toast"+(err?" err":"")}
+  clearTimeout(flash.t);flash.t=setTimeout(()=>{state.toast="";const t=$("#toast");if(t)t.textContent=""},err?6000:3500)}
+const draftOf=key=>key==="new"?state.newVol:state.volDraft[key];
+
+async function logoutKakao(msg){
+  try{await api("/api/logout",{})}catch(e){}
+  state.form=blankForm();state.formOwner="";state.newReg=false;state.linkPick="";state.proxyId="";state.editCell=null;
+  await load(false);if(msg)flash(msg,true);
+}
+// 로그인이 풀린 경우: 화면을 다시 불러오고 안내합니다.
+function authError(e){
+  if(e.code!=="login_required")return false;
+  state.formOwner="";load(false).then(()=>flash(e.message,true));return true;
+}
+function loadProxyForm(){const v=vol(state.proxyId);state.form=v?formFrom(v):blankForm()}
+
+async function linkMine(){
+  const pick=vol(state.linkPick);if(!pick)return;
+  state.busy=true;render();
+  try{const v=await api("/api/mine/link",{volId:pick.id,month:state.month});
+    state.linkPick="";state.busy=false;setView(v);render();
+    flash(`${v.me.vol.name}님으로 연결했어요. 이제 가능한 예배를 체크하고 저장하세요.`);
+  }catch(e){state.busy=false;if(!authError(e)){render();flash(e.message,true)}}
+}
+
+async function saveMine(){
+  const f=state.form,name=f.name.trim();
+  if(!name)return flash("이름을 입력해 주세요.",true);
+  if(!f.roles.length)return flash("맡을 수 있는 역할을 하나 이상 골라 주세요.",true);
+  state.busy=true;render();
+  try{
+    const v=await api("/api/mine/save",{name,roles:f.roles,dates:f.dates,touched:[...new Set([...f.touched,state.month])],month:state.month});
+    state.newReg=false;state.formOwner="";setView(v);state.busy=false;render();
+    const n=v.me.vol.dates.filter(d=>d.startsWith(state.month)).length;
+    flash(`저장했어요. ${mLabel(state.month)} 가능 ${n}개 예배`);
+  }catch(e){state.busy=false;if(!authError(e)){render();flash(e.message,true)}}
+}
+
+async function saveProxy(){
+  const v=vol(state.proxyId);if(!v)return;
+  if(await run("admin/saveDates",{month:state.month,id:v.id,dates:state.form.dates},`${v.name}님의 ${mLabel(state.month)} 일정을 저장했어요.`)){loadProxyForm();render()}
+}
+
+async function setupAdmin(){
+  const code=(($("#setupCode")||{}).value||"").trim();
+  if(!code)return flash("설정 코드를 입력해 주세요.",true);
+  if(await run("setup",{code,month:state.month},"전체 관리자로 지정됐어요. 이제 관리 탭의 모든 기능을 쓸 수 있어요."))render();
+}
+
+document.addEventListener("click",async e=>{
+  const t=e.target.closest("button");if(!t||t.disabled)return;
+  const M=state.month;
+  if(t.id==="prevM"||t.id==="nextM"){state.month=shiftMonth(M,t.id==="prevM"?-1:1);state.confirmDel=state.confirmReset=null;state.editCell=null;return load(false)}
+  if(t.dataset.tab){state.tab=t.dataset.tab;state.toast="";state.roleDraft={};state.editCell=null;state.evDraft=null;return render()}
+  if(t.dataset.filter){state.filter=t.dataset.filter;state.editCell=null;return render()}
+  if(t.id==="kakaoLogout")return logoutKakao("");
+  if(t.id==="linkSave")return linkMine();
+  if(t.id==="newReg"){state.newReg=true;state.form={...blankForm(),name:(V().me&&V().me.nickname)||""};return render()}
+  if(t.id==="backLink"){state.newReg=false;return render()}
+  if(t.id==="proxySave")return saveProxy();
+  if(t.dataset.role){state.form.roles=toggle(state.form.roles,t.dataset.role);return render()}
+  if(t.dataset.day){const f=state.form;f.dates=toggle(f.dates,t.dataset.day).sort();if(!f.touched.includes(M))f.touched.push(M);return render()}
+  if(t.id==="save")return saveMine();
+  if(t.id==="copy")return copyText();
+  if(t.id==="copyIcal"){const url=V().calendar.ical;
+    try{await navigator.clipboard.writeText(url);flash("주소를 복사했어요. 아이폰은 설정 → 캘린더 → 계정 → 계정 추가 → 기타 → 구독 캘린더 추가에 붙여넣으세요.")}
+    catch(err){$("#icalArea").innerHTML=`<textarea rows="2" readonly></textarea>`;const ta=$("#icalArea textarea");ta.value=url;ta.select();flash("아래 주소를 길게 눌러 복사해 주세요.")}
+    return}
+  if(t.id==="refresh"){await load(true);render();return flash("최신 내용으로 불러왔어요.")}
+  if(t.id==="setupSave")return setupAdmin();
+  // 이하 관리자 동작
+  if(t.dataset.cell){const d=t.dataset.cell,s=t.dataset.svc,role=t.dataset.crole;
+    state.editCell={d,s,role,picks:cellPeople(V().schedule.slots,d,s,role).map(p=>p.id)};return render()}
+  if(t.id==="ecAdd"){state.editCell.picks.push("");return render()}
+  if(t.id==="ecClose"){state.editCell=null;return render()}
+  if(t.id==="ecSave"||t.id==="ecAuto"){
+    const ec=state.editCell,revert=t.id==="ecAuto",ids=[...new Set(ec.picks.filter(Boolean))];
+    const fn=V().schedule.finalCats.includes(roleCat(ec.role))?"editFinalCell":"saveOverride";
+    state.editCell=null;
+    return run("admin/"+fn,{month:M,date:ec.d,svc:ec.s,role:ec.role,ids:revert?null:ids},revert?"이 칸을 자동 배정으로 되돌렸어요.":`${dLabel(ec.d)} ${svcLabel(ec.s)} ${ec.role} 칸을 저장했어요.`)}
+  if(t.dataset.final)return run("admin/setFinal",{month:M,cat:t.dataset.final},`${t.dataset.final} 스케줄을 확정하고 구글 캘린더에도 올렸어요.`);
+  if(t.dataset.unfinal)return run("admin/unsetFinal",{month:M,cat:t.dataset.unfinal},`${t.dataset.unfinal} 확정을 해제하고 캘린더 일정도 지웠어요. 수동으로 정한 칸 외에는 다시 자동 배정됩니다.`);
+  if(t.dataset.vrole){const dr=draftOf(t.dataset.vid);dr.roles=toggle(dr.roles,t.dataset.vrole);return render()}
+  if(t.id==="nvSave"){const nv=state.newVol,name=nv.name.trim();
+    if(!name)return flash("이름을 입력해 주세요.",true);
+    if(!nv.roles.length)return flash("역할을 하나 이상 골라 주세요.",true);
+    if(await run("admin/saveVolunteer",{month:M,name,roles:nv.roles,lockedCats:nv.lockedCats,svcLock:nv.svcLock},`${name}님을 등록했어요.`)){state.newVol=blankNew();render()}return}
+  if(t.dataset.vsave){const v=vol(t.dataset.vsave),dr=state.volDraft[v.id];
+    return run("admin/saveVolunteer",{month:M,id:v.id,name:v.name,roles:dr.roles,lockedCats:dr.lockedCats,svcLock:dr.svcLock},`${v.name}님 정보를 저장했어요.`)}
+  if(t.dataset.vunlink){const id=t.dataset.vunlink;if(state.confirmUnlink!==id){state.confirmUnlink=id;state.confirmDel=state.confirmReset=null;return render()}
+    state.confirmUnlink=null;return run("admin/unlinkKakao",{month:M,id},"카카오 연결을 해제했어요. 본인이 다시 로그인해서 이름을 연결하면 됩니다.")}
+  if(t.dataset.vproxy){state.proxyId=t.dataset.vproxy;loadProxyForm();state.tab="input";state.toast="";return render()}
+  if(t.dataset.vdel){const id=t.dataset.vdel;if(state.confirmDel!==id){state.confirmDel=id;state.confirmReset=state.confirmUnlink=null;return render()}
+    state.confirmDel=null;if(state.proxyId===id)state.proxyId="";return run("admin/deleteVolunteer",{month:M,id},"삭제했어요.")}
+  if(t.id==="evNew"){state.evDraft=blankEvent();return render()}
+  if(t.id==="evCancel"){state.evDraft=null;return render()}
+  if(t.dataset.evedit){const e=(V().allEvents||[]).find(x=>x.id===t.dataset.evedit);if(!e)return;
+    state.evDraft={id:e.id,name:e.name,date:e.date,teams:[...e.teams],slots:e.slots.map(sl=>({...sl}))};render();
+    const f=$("#evAdmin");if(f)f.scrollIntoView({block:"start"});return}
+  if(t.dataset.adsave){const k=t.dataset.adsave,d=state.adminDraft[k];if(!d)return;
+    const admin=d.level==="all"?{all:true}:d.level==="team"&&d.cats.length?{cats:d.cats}:null;
+    if(d.level==="team"&&!d.cats.length)return flash("담당할 팀을 하나 이상 골라 주세요.",true);
+    if(await run("admin/setAdmin",{month:M,kakaoId:k,admin},"관리자 권한을 저장했어요.")){delete state.adminDraft[k];render()}return}
+  if(t.dataset.adcat){const k=t.dataset.adk,u=(V().users||[]).find(x=>x.kakaoId===k);if(!u)return;
+    const d=state.adminDraft[k]||(state.adminDraft[k]={level:"team",cats:u.admin&&!u.admin.all?[...u.admin.cats]:[]});d.cats=toggle(d.cats,t.dataset.adcat);return render()}
+  if(t.dataset.evteam){const d=state.evDraft;d.teams=toggle(d.teams,t.dataset.evteam);return render()}
+  if(t.id==="evAddSlot"){const d=state.evDraft,last=d.slots[d.slots.length-1]||{};d.slots.push({k:"",label:"",start:last.end||"19:00",end:""});return render()}
+  if(t.dataset.evsdel){state.evDraft.slots.splice(+t.dataset.evsdel,1);return render()}
+  if(t.id==="evSave"){const d=state.evDraft;
+    if(!d.name.trim())return flash("이벤트 이름을 입력해 주세요.",true);
+    if(!d.date)return flash("날짜를 골라 주세요.",true);
+    if(!d.teams.length)return flash("필요한 팀을 하나 이상 골라 주세요.",true);
+    if(d.slots.some(sl=>!sl.start))return flash("시간대마다 시작 시간을 넣어 주세요.",true);
+    const ym=d.date.slice(0,7);
+    if(await run("admin/saveEvent",{month:M,event:d},`‘${d.name.trim()}’ 일정을 ${d.id?"수정했어요":"만들었어요"}.${ym!==M?` ${mLabel(ym)}로 넘어가면 볼 수 있어요.`:""}`)){state.evDraft=null;render()}return}
+  if(t.dataset.evdel){const id=t.dataset.evdel;if(state.confirmEvDel!==id){state.confirmEvDel=id;return render()}
+    state.confirmEvDel=null;return run("admin/deleteEvent",{month:M,id},"특별 일정을 삭제했어요.")}
+  if(t.dataset.addrole){state.roleDraft[t.dataset.addrole].push({name:"",count:1});return render()}
+  if(t.dataset.rdel){state.roleDraft[t.dataset.rdel].splice(+t.dataset.ri,1);return render()}
+  if(t.dataset.saveroles){const c=t.dataset.saveroles;
+    const roles=state.roleDraft[c].map(r=>({name:r.name.trim(),count:r.count})).filter(r=>r.name);
+    if(!roles.length)return flash("역할을 하나 이상 남겨 주세요.",true);
+    if(new Set(roles.map(r=>r.name)).size!==roles.length)return flash("같은 이름의 역할이 있어요.",true);
+    if(await run("admin/saveRoles",{month:M,cat:c,roles},`${c} 역할을 저장했어요.`)){delete state.roleDraft[c];render()}return}
+});
+document.addEventListener("change",e=>{
+  const t=e.target;
+  if(t.id==="linkWho"){state.linkPick=t.value;state.toast="";render()}
+  if(t.dataset.adlevel){const k=t.dataset.adlevel,u=(V().users||[]).find(x=>x.kakaoId===k);if(!u)return;
+    const d=state.adminDraft[k]||(state.adminDraft[k]={level:"none",cats:u.admin&&!u.admin.all?[...u.admin.cats]:[]});d.level=t.value;render()}
+  if(t.id==="proxyWho"){state.proxyId=t.value;state.toast="";if(t.value)loadProxyForm();else{const mv=V().me&&V().me.vol;state.form=mv?formFrom(mv):blankForm();state.formOwner=mv?mv.id:""}render()}
+  if(t.dataset.slot!==undefined){state.editCell.picks[+t.dataset.slot]=t.value;render()}
+  if(t.dataset.vlock){const dr=draftOf(t.dataset.vlock),c=t.dataset.vcat;
+    dr.lockedCats=t.checked?[...new Set([...dr.lockedCats,c])]:dr.lockedCats.filter(x=>x!==c)}
+  if(t.dataset.vsvc){const dr=draftOf(t.dataset.vsvc);dr.svcLock={...dr.svcLock,[t.dataset.vcat]:t.value};if(!t.value)delete dr.svcLock[t.dataset.vcat]}
+});
+document.addEventListener("input",e=>{
+  const t=e.target;
+  if(t.id==="nm")state.form.name=t.value;
+  if(t.id==="nvName")state.newVol.name=t.value;
+  if(t.id==="evName")state.evDraft.name=t.value;
+  if(t.id==="evDate")state.evDraft.date=t.value;
+  if(t.dataset.evs!==undefined){state.evDraft.slots[+t.dataset.evs][t.dataset.k]=t.value}
+  if(t.dataset.rc){const r=state.roleDraft[t.dataset.rc][+t.dataset.ri];
+    if(t.dataset.k==="name")r.name=t.value;else r.count=Math.max(1,Math.min(10,parseInt(t.value)||1))}
+});
+document.addEventListener("keydown",e=>{
+  if(e.key!=="Enter")return;
+  if(e.target.id==="setupCode")setupAdmin();
+});
+
+async function copyText(){
+  const slots=V().schedule.slots;
+  const cats=state.filter==="전체"?V().cats.map(c=>c.name):[state.filter];
+  const lines=[`[${mLabel(state.month)} 주일 예배팀 스케줄${state.filter==="전체"?"":" · "+state.filter}]`,""];
+  for(const b of blocks()){
+    const bc=b.sunday?cats:cats.filter(c=>b.teams.includes(c));if(!bc.length)continue;
+    lines.push(b.sunday?`■ ${dLabel(b.d)}`:`★ ${dLabel(b.d)}(${dayName(b.d)}) ${b.title}`);
+    for(const o of b.occ){lines.push(` [${o.label}${o.time?" "+o.time:""}]`);
+      for(const c of bc){const parts=catRoles(c).map(r=>`${r.name} ${cellPeople(slots,o.d,o.s,r.name).map(p=>p.name).join(", ")||"(미정)"}`);
+        if(parts.length)lines.push(`  ${bc.length>1?c+" — ":""}${parts.join(" / ")}`)}}
+    lines.push("")}
+  const text=lines.join("\n").trim();
+  try{await navigator.clipboard.writeText(text);flash("복사했어요. 단톡방에 붙여넣으세요.")}
+  catch(e){$("#copyArea").innerHTML=`<textarea rows="12" readonly></textarea>`;const ta=$("#copyArea textarea");ta.value=text;ta.select();
+    flash("아래 글을 길게 눌러 복사해 주세요.")}
+}
+
+/* ---------- 시작 ---------- */
+(function(){
+  // 카카오 로그인에서 돌아온 경우 결과를 보여 주고 주소창을 정리합니다.
+  const p=new URLSearchParams(location.search);
+  if(p.get("login")==="ok")state.tab="input";
+  if(p.get("login_error"))state.loginMsg=p.get("login_error");
+  if(p.has("login")||p.has("login_error"))try{history.replaceState(null,"",location.pathname+location.hash)}catch(e){}
+})();
+render();
+load(false);
+setInterval(()=>{if(!document.hidden&&state.tab==="schedule"&&!state.busy)load(true)},60000);
+</script>
+</body>
+</html>
