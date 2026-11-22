@@ -28,7 +28,7 @@ function ctxOf(data, config) {
   const roles = (data.roles && data.roles.length ? data.roles : config.DEFAULT_ROLES).filter(r => catSet.indexOf(r.cat) >= 0);
   const vols = Object.values(data.vols).map(v => ({
     id: v.id, name: v.name, roles: v.roles || [], dates: v.dates || [],
-    lockedCats: (v.lockedCats || []).filter(c => catSet.indexOf(c) >= 0), svcLock: v.svcLock || {}, kakaoId: v.kakaoId || '',
+    lockedCats: (v.lockedCats || []).filter(c => catSet.indexOf(c) >= 0), svcLock: v.svcLock || {}, prio: v.prio || {}, kakaoId: v.kakaoId || '',
   })).sort((a, b) => a.id.localeCompare(b.id));
   const events = Object.values(data.events)
     .filter(e => e.name && /^\d{4}-\d{2}-\d{2}$/.test(e.date) && (e.slots || []).length && (e.teams || []).some(t => catSet.indexOf(t) >= 0))
@@ -170,6 +170,14 @@ ADMIN.saveVolunteer = (tx, ctx, admin, b) => {
     const s = String(((b.svcLock || {})[c]) || '');
     if (L.SERVICES.indexOf(s) >= 0) cur.svcLock[c] = s; else delete cur.svcLock[c];
   });
+  // 배정 우선순위: 보내온 경우에만 바꿉니다 (usePriority 팀, 내가 관리하는 팀만)
+  if (b.prio && typeof b.prio === 'object') {
+    cur.prio = Object.assign({}, cur.prio || {});
+    cats.filter(c => L.usesPrio(ctx, c)).forEach(c => {
+      const p = String(b.prio[c] || '');
+      if (L.PRIORITIES.indexOf(p) >= 0) cur.prio[c] = p; else delete cur.prio[c];
+    });
+  }
   if (!cur.roles.length && !curRaw) fail('역할을 하나 이상 골라 주세요.');
   cur.name = name;
   cur.updatedAt = nowIso();

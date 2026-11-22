@@ -206,7 +206,7 @@ async function api(path,body){
 
 const blankForm=()=>({id:"",name:"",roles:[],dates:[],touched:[],lockedCats:[],svcLock:{}});
 const formFrom=v=>({id:v.id,name:v.name,roles:[...v.roles],dates:[...(v.dates||[])],touched:[],lockedCats:[...v.lockedCats],svcLock:{...v.svcLock}});
-const blankNew=()=>({name:"",roles:[],lockedCats:[],svcLock:{}});
+const blankNew=()=>({name:"",roles:[],lockedCats:[],svcLock:{},prio:{}});
 const state={month:shiftMonth(monthKeyOf(new Date()),1),view:null,loading:true,error:"",loginMsg:"",formOwner:"",
   tab:"input",form:blankForm(),filter:"전체",editCell:null,volDraft:{},newVol:blankNew(),roleDraft:{},
   toast:"",toastErr:false,toastAt:"",busy:false,confirmDel:null,confirmReset:null,confirmUnlink:null,
@@ -218,6 +218,8 @@ const vol=id=>((V()&&V().vols)||[]).find(v=>v.id===id);
 const roleCat=name=>((V().roles.find(r=>r.name===name))||{}).cat;
 const catRoles=cat=>V().roles.filter(r=>r.cat===cat);
 const bothOk=cat=>!!(V().cats.find(c=>c.name===cat)||{}).bothServices;
+const usesPrio=cat=>!!(V().cats.find(c=>c.name===cat)||{}).usePriority;
+const PRIOS=[["high","자주"],["","보통"],["low","가끔"]];
 
 /* ---------- 서버에서 불러오기 ---------- */
 let loadSeq=0;
@@ -495,7 +497,7 @@ function renderSchedule(){
   ${calHtml()}
   ${admin?`<h2>${esc(mLabel(state.month))} 봉사 횟수${state.filter==="전체"?"":` · ${esc(state.filter)}`} <span class="scope">관리자만 보임</span></h2>
   <div class="tally wide">${list.map(([n,,t])=>`<div><b>${esc(n)}</b><span>${esc(t)}</span></div>`).join("")}</div>
-  <p class="hint" style="margin-top:14px">횟수는 봉사한 주일 수입니다(1부·2부를 모두 섬겨도 1회, 특별 일정은 넣지 않음). 가능·지난 2달 통계는 관리하는 팀 기준입니다. 배정 기준: 사람 구하기 어려운 칸부터 채우고, 이번 달·지난달·전전달에 덜 섬긴 사람과 지난주에 쉬었던 사람을 먼저 배정합니다. 방송실은 하루에 한 부만, 찬양팀은 1부 팀이 2부에도 이어서 섬기도록 배정합니다.</p>`:""}`;
+  <p class="hint" style="margin-top:14px">횟수는 봉사한 주일 수입니다(1부·2부를 모두 섬겨도 1회, 특별 일정은 넣지 않음). 가능·지난 2달 통계는 관리하는 팀 기준입니다. 배정 기준: 사람 구하기 어려운 칸부터 채우고, 이번 달·지난달·전전달에 덜 섬긴 사람과 지난주에 쉬었던 사람을 먼저 배정합니다. 찬양팀은 관리 탭에서 정한 배정 우선순위(자주·가끔)도 크게 반영합니다. 방송실은 하루에 한 부만, 찬양팀은 1부 팀이 2부에도 이어서 섬기도록 배정합니다.</p>`:""}`;
 }
 
 const blankEvent=()=>({id:"",name:"",date:"",teams:myCats().length===1?[...myCats()]:[],slots:[{k:"",label:"",start:"19:00",end:"20:30"}]});
@@ -575,13 +577,15 @@ function renderSettings(){
   const cats=myCats(),master=!!V().admin.all;
   cats.forEach(c=>{if(!state.roleDraft[c])state.roleDraft[c]=catRoles(c).map(r=>({name:r.name,count:r.count}))});
   const nv=state.newVol;
-  const draft=v=>state.volDraft[v.id]||(state.volDraft[v.id]={roles:[...v.roles],lockedCats:[...v.lockedCats],svcLock:{...v.svcLock}});
+  const draft=v=>state.volDraft[v.id]||(state.volDraft[v.id]={roles:[...v.roles],lockedCats:[...v.lockedCats],svcLock:{...v.svcLock},prio:{...(v.prio||{})}});
   const vols=[...V().vols].sort((a,b)=>a.name.localeCompare(b.name,"ko"));
   const catControls=(dr,key,c)=>`<div class="catrow"><span class="catname">${esc(c)}</span>
     <div class="chips sm">${catRoles(c).map(r=>`<button class="chip" data-vrole="${esc(r.name)}" data-vid="${esc(key)}" aria-pressed="${dr.roles.includes(r.name)}">${esc(r.name)}</button>`).join("")}</div>
     <div class="row"><label class="check"><input type="checkbox" id="lk-${esc(key)}-${esc(c)}" data-vlock="${esc(key)}" data-vcat="${esc(c)}" ${dr.lockedCats.includes(c)?"checked":""}> 역할 고정</label>
       <label class="check">부 고정 <select class="small" id="sv-${esc(key)}-${esc(c)}" data-vsvc="${esc(key)}" data-vcat="${esc(c)}">
-        <option value="" ${!dr.svcLock[c]?"selected":""}>없음</option>${SVCS.map(s=>`<option value="${s}" ${dr.svcLock[c]===s?"selected":""}>${svcLabel(s)}만</option>`).join("")}</select></label></div></div>`;
+        <option value="" ${!dr.svcLock[c]?"selected":""}>없음</option>${SVCS.map(s=>`<option value="${s}" ${dr.svcLock[c]===s?"selected":""}>${svcLabel(s)}만</option>`).join("")}</select></label>
+      ${usesPrio(c)?`<label class="check">배정 우선순위 <select class="small" id="pr-${esc(key)}-${esc(c)}" data-vprio="${esc(key)}" data-vcat="${esc(c)}">
+        ${PRIOS.map(([k,l])=>`<option value="${k}" ${(dr.prio[c]||"")===k?"selected":""}>${l}</option>`).join("")}</select></label>`:""}</div></div>`;
   $("#view").innerHTML=`
   <div class="row" style="margin-bottom:16px;justify-content:space-between"><span class="scope">${master?"전체 관리자":esc(cats.join("·"))+" 담당자"}${V().me.nickname?` · ${esc(V().me.nickname)}`:""}</span><button class="btn ghost" id="kakaoLogout">로그아웃</button></div>
   ${toastHtml()}
@@ -720,9 +724,9 @@ document.addEventListener("click",async e=>{
   if(t.id==="nvSave"){const nv=state.newVol,name=nv.name.trim();
     if(!name)return flash("이름을 입력해 주세요.",true);
     if(!nv.roles.length)return flash("역할을 하나 이상 골라 주세요.",true);
-    if(await run("admin/saveVolunteer",{month:M,name,roles:nv.roles,lockedCats:nv.lockedCats,svcLock:nv.svcLock},`${name}님을 등록했어요.`)){state.newVol=blankNew();render()}return}
+    if(await run("admin/saveVolunteer",{month:M,name,roles:nv.roles,lockedCats:nv.lockedCats,svcLock:nv.svcLock,prio:nv.prio},`${name}님을 등록했어요.`)){state.newVol=blankNew();render()}return}
   if(t.dataset.vsave){const v=vol(t.dataset.vsave),dr=state.volDraft[v.id];
-    return run("admin/saveVolunteer",{month:M,id:v.id,name:v.name,roles:dr.roles,lockedCats:dr.lockedCats,svcLock:dr.svcLock},`${v.name}님 정보를 저장했어요.`)}
+    return run("admin/saveVolunteer",{month:M,id:v.id,name:v.name,roles:dr.roles,lockedCats:dr.lockedCats,svcLock:dr.svcLock,prio:dr.prio},`${v.name}님 정보를 저장했어요.`)}
   if(t.dataset.vunlink){const id=t.dataset.vunlink;if(state.confirmUnlink!==id){state.confirmUnlink=id;state.confirmDel=state.confirmReset=null;return render()}
     state.confirmUnlink=null;return run("admin/unlinkKakao",{month:M,id},"카카오 연결을 해제했어요. 본인이 다시 로그인해서 이름을 연결하면 됩니다.")}
   if(t.dataset.vproxy){state.proxyId=t.dataset.vproxy;loadProxyForm();state.tab="input";state.toast="";return render()}
@@ -769,6 +773,7 @@ document.addEventListener("change",e=>{
   if(t.dataset.vlock){const dr=draftOf(t.dataset.vlock),c=t.dataset.vcat;
     dr.lockedCats=t.checked?[...new Set([...dr.lockedCats,c])]:dr.lockedCats.filter(x=>x!==c)}
   if(t.dataset.vsvc){const dr=draftOf(t.dataset.vsvc);dr.svcLock={...dr.svcLock,[t.dataset.vcat]:t.value};if(!t.value)delete dr.svcLock[t.dataset.vcat]}
+  if(t.dataset.vprio){const dr=draftOf(t.dataset.vprio);dr.prio={...(dr.prio||{}),[t.dataset.vcat]:t.value};if(!t.value)delete dr.prio[t.dataset.vcat]}
 });
 document.addEventListener("input",e=>{
   const t=e.target;

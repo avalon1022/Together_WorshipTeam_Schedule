@@ -198,5 +198,47 @@ const L = require('../functions/src/logic');
   r = await S.call('POST', '/api/admin/setFinal', { cookie: B.cookie, body: { month: M, cat: '찬양팀' } });
   ok(r.status === 200 && /캘린더에 반영하지 못했어요/.test(r.json.notice || ''), 'calendar error → saved with notice');
 
+  /* ---------- 찬양팀 배정 우선순위 ---------- */
+  {
+    const S3 = makeServer({ kakaoUsers });
+    const P = await S3.login('c1'), T = await S3.login('c2'), U = await S3.login('c3');
+    await S3.call('POST', '/api/setup', { cookie: P.cookie, body: { month: M, code: 'SETUP-123' } });
+    await S3.call('POST', '/api/admin/setAdmin', { cookie: P.cookie, body: { month: M, kakaoId: '1002', admin: { cats: ['방송실'] } } });
+    for (const n of ['높음', '낮음']) await S3.call('POST', '/api/admin/saveVolunteer', { cookie: P.cookie, body: { month: M, name: n, roles: ['인도'] } });
+    let v = (await S3.call('GET', '/api/view?month=' + M, { cookie: P.cookie })).json;
+    const id = n => v.vols.find(x => x.name === n).id;
+    for (const n of ['높음', '낮음']) await S3.call('POST', '/api/admin/saveDates', { cookie: P.cookie, body: { month: M, id: id(n), dates: dec.flatMap(both) } });
+    const leads = vw => { const c = {}; dec.forEach(d => (vw.schedule.slots[d]['1']['인도'] || []).forEach(p => { c[p.name] = (c[p.name] || 0) + 1; })); return c; };
+    v = (await S3.call('GET', '/api/view?month=' + M, { cookie: P.cookie })).json;
+    let c = leads(v);
+    ok(c['높음'] === 2 && c['낮음'] === 2, 'no priority → even split');
+    ok(v.cats.find(x => x.name === '찬양팀').usePriority && !v.cats.find(x => x.name === '방송실').usePriority, 'only 찬양팀 uses priority');
+    let r = await S3.call('POST', '/api/admin/saveVolunteer', { cookie: P.cookie, body: { month: M, id: id('높음'), name: '높음', roles: ['인도'], prio: { 찬양팀: 'high', 방송실: 'high' } } });
+    await S3.call('POST', '/api/admin/saveVolunteer', { cookie: P.cookie, body: { month: M, id: id('낮음'), name: '낮음', roles: ['인도'], prio: { 찬양팀: 'low' } } });
+    v = (await S3.call('GET', '/api/view?month=' + M, { cookie: P.cookie })).json;
+    c = leads(v);
+    ok(c['높음'] >= 3 && c['낮음'] >= 1, 'high priority gets more, low still gets some');
+    ok(JSON.stringify(v.vols.find(x => x.name === '높음').prio) === '{"찬양팀":"high"}', 'admin sees priority, 방송실 ignored');
+    // 2부도 같은 사람이 이어서
+    ok(dec.every(d => (v.schedule.slots[d]['2']['인도'][0] || {}).name === (v.schedule.slots[d]['1']['인도'][0] || {}).name), '찬양팀 same leader both services');
+    // 일반 사용자와 비로그인에는 안 보임
+    const pub = (await S3.call('GET', '/api/view?month=' + M)).json;
+    ok(pub.vols.every(x => x.prio === undefined), 'public view hides priority');
+    const tv = (await S3.call('GET', '/api/view?month=' + M, { cookie: T.cookie })).json;
+    ok(tv.vols.every(x => !x.prio || !x.prio['찬양팀']), '방송실 admin cannot see 찬양팀 priority');
+    // 방송실 담당자가 저장해도 찬양팀 우선순위는 그대로
+    await S3.call('POST', '/api/admin/saveVolunteer', { cookie: T.cookie, body: { month: M, id: id('높음'), name: '높음', roles: [], prio: { 찬양팀: 'low' } } });
+    v = (await S3.call('GET', '/api/view?month=' + M, { cookie: P.cookie })).json;
+    ok(v.vols.find(x => x.name === '높음').prio['찬양팀'] === 'high', 'other team admin cannot change priority');
+    // prio를 안 보내면 기존 값 유지
+    await S3.call('POST', '/api/admin/saveVolunteer', { cookie: P.cookie, body: { month: M, id: id('높음'), name: '높음', roles: ['인도'] } });
+    v = (await S3.call('GET', '/api/view?month=' + M, { cookie: P.cookie })).json;
+    ok(v.vols.find(x => x.name === '높음').prio['찬양팀'] === 'high', 'omitted prio keeps value');
+    await S3.call('POST', '/api/admin/saveVolunteer', { cookie: P.cookie, body: { month: M, id: id('높음'), name: '높음', roles: ['인도'], prio: {} } });
+    v = (await S3.call('GET', '/api/view?month=' + M, { cookie: P.cookie })).json;
+    ok(!v.vols.find(x => x.name === '높음').prio['찬양팀'], 'normal clears priority');
+    void U;
+  }
+
   summary();
 })().catch(e => { console.error(e); process.exitCode = 1; });

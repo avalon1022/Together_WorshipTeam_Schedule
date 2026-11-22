@@ -2,9 +2,10 @@
  * 배정 계산과 화면 데이터 만들기 (저장소와 무관한 순수 로직)
  *
  * ctx = {
- *   cats:      [{ name, bothServices }],
+ *   cats:      [{ name, bothServices, usePriority }],
  *   roles:     [{ cat, name, count }],
- *   vols:      [{ id, name, roles, dates, lockedCats, svcLock, kakaoId }],
+ *   vols:      [{ id, name, roles, dates, lockedCats, svcLock, prio, kakaoId }],
+ *              prio: { 팀: 'high' | 'low' }  관리자 배정 우선순위 (usePriority 팀만, 관리자에게만 보임)
  *   events:    [{ id, name, date, teams, slots: [{ k, label, start, end }] }],
  *   confirmed: { 'YYYY-MM|팀': slots },
  *   overrides: { 'YYYY-MM': { 날짜: { 시간대: { 역할: [봉사자ID] } } } },
@@ -17,6 +18,10 @@
 'use strict';
 
 const SERVICES = ['1', '2'];
+// 배정 우선순위: '자주'는 점수를 빼고 '가끔'은 더합니다. 20점이면 이번 달 주일 2회 정도 차이를 뒤집습니다.
+const PRIORITIES = ['high', 'low'];
+const PRIO_WEIGHT = 20;
+const usesPrio = (ctx, cat) => !!(ctx.cats.find(c => c.name === cat) || {}).usePriority;
 
 class UserError extends Error {
   constructor(message, code) { super(message); this.code = code || 'bad_request'; }
@@ -184,6 +189,7 @@ function buildSchedule(ctx, key, depth, memo) {
 
     tasks.forEach(t => {
       const o = t.o;
+      const prioOn = usesPrio(ctx, t.r.cat);
       const ok = v => {
         if (used[o.s].has(v.id)) return false;
         return Object.keys(on[v.id] || {}).every(s2 => {
@@ -196,6 +202,10 @@ function buildSchedule(ctx, key, depth, memo) {
       const score = v => {
         const k = v.id + '|' + t.r.name;
         let sc = (total[v.id] || 0) * 10 + (H.h[v.id] || 0) + (prev.has(v.id) ? 6 : 0) + (perRole[k] || 0) * 2 + (H.hr[k] || 0);
+        if (prioOn) {
+          const p = (v.prio || {})[t.r.cat];
+          if (p === 'high') sc -= PRIO_WEIGHT; else if (p === 'low') sc += PRIO_WEIGHT;
+        }
         if ((inGroup[o.group] || new Set()).has(v.id)) {
           sc -= 10;
           if (sameRoleElsewhere(v)) sc -= 5;
@@ -231,7 +241,7 @@ function publicView(ctx, month, memo) {
   });
   return {
     month,
-    cats: ctx.cats.map(c => ({ name: c.name, bothServices: !!c.bothServices })),
+    cats: ctx.cats.map(c => ({ name: c.name, bothServices: !!c.bothServices, usePriority: !!c.usePriority })),
     roles: ctx.roles,
     vols: ctx.vols.map(publicVol),
     schedule: { slots: buildSchedule(ctx, month, 2, memo), finalCats: catNames(ctx).filter(c => ctx.confirmed[month + '|' + c]) },
@@ -262,8 +272,11 @@ function adminExtras(ctx, month, admin, view, memo) {
   view.admin = { all: !!admin.all, cats };
   view.vols = ctx.vols.map(v => {
     const dates = v.dates.filter(x => x.indexOf(month) === 0);
+    const prio = {};
+    cats.forEach(c => { if (usesPrio(ctx, c) && (v.prio || {})[c]) prio[c] = v.prio[c]; });
     return Object.assign(publicVol(v), {
       dates,
+      prio,
       stats: { now: now[v.id] || 0, recent: recent[v.id] || 0, avail: uniq(dates.map(x => x.slice(0, 10))).length },
     });
   });
@@ -276,7 +289,7 @@ function adminExtras(ctx, month, admin, view, memo) {
 }
 
 module.exports = {
-  SERVICES, UserError, fail, uniq, shiftMonth, sundays, eachCell, catNames, bothOk,
+  SERVICES, PRIORITIES, PRIO_WEIGHT, usesPrio, UserError, fail, uniq, shiftMonth, sundays, eachCell, catNames, bothOk,
   checkMonth, checkCat, plain, cleanName, cleanSlots, cleanIds,
   occasions, occOf, buildSchedule, countServed, publicView, adminExtras, editableCats, needCat,
   eventView, publicVol, mineView,
