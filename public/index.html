@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>주일 예배팀 스케줄</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" href="/icons/favicon.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="theme-color" content="#3D576A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="예배팀 스케줄">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
 <style>
 /* 밝은 화면: 회청색 배경 + 밝은 카드 / 다크 모드: 다크 세이지 */
@@ -144,6 +152,11 @@ select.small{width:auto;padding:5px 8px;font-size:13px}
 .whoami{justify-content:space-between;margin-bottom:12px;font-size:14px;color:var(--muted)}
 .whoami b{color:var(--ink)}
 .btn.small{padding:6px 12px;font-size:13px}
+.install{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 0 16px}
+.install img{width:40px;height:40px;border-radius:10px;flex:none}
+.install .txt{flex:1;min-width:180px;font-size:14px}
+.install .txt b{display:block}
+.install .txt span{color:var(--muted);font-size:13px}
 .linkbtn{font:inherit;font-size:13px;color:var(--accent);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline}
 .whois select{max-width:420px}
 .evlist{display:flex;flex-direction:column;gap:10px}
@@ -184,6 +197,7 @@ a.btn{text-decoration:none;display:inline-block}
       <button class="icon-btn" id="nextM" aria-label="다음 달">›</button>
     </div>
   </header>
+  <div id="install"></div>
   <div id="banner"></div>
   <nav class="tabs" role="tablist" id="tabs"></nav>
   <main id="view"></main>
@@ -884,6 +898,33 @@ async function copyText(){
 })();
 render();
 load(false);
+
+/* ---------- 홈 화면 앱(PWA) ---------- */
+(function(){
+  if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}));
+  const standalone=window.matchMedia("(display-mode: standalone)").matches||navigator.standalone===true;
+  if(standalone)return;
+  const KEY="installHideUntil";
+  try{if(Date.now()<+(localStorage.getItem(KEY)||0))return}catch(e){}
+  const ua=navigator.userAgent;
+  const ios=/iPhone|iPad|iPod/.test(ua)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+  const iosSafari=ios&&/Safari/.test(ua)&&!/CriOS|FxiOS|EdgiOS|KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line/i.test(ua);
+  const inApp=/KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line/i.test(ua);
+  let deferred=null;
+  const box=$("#install");
+  function show(html){box.innerHTML=`<div class="install"><img src="/icons/icon-192.png" alt=""><div class="txt">${html}</div>
+    ${deferred?`<button class="btn small" id="installGo">설치</button>`:""}<button class="btn ghost small" id="installHide">닫기</button></div>`}
+  box.addEventListener("click",async e=>{
+    const t=e.target.closest("button");if(!t)return;
+    if(t.id==="installHide"){try{localStorage.setItem(KEY,String(Date.now()+30*86400000))}catch(err){}box.innerHTML=""}
+    if(t.id==="installGo"&&deferred){deferred.prompt();try{await deferred.userChoice}catch(err){}deferred=null;box.innerHTML=""}
+  });
+  window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferred=e;
+    show(`<b>홈 화면에 앱으로 추가하기</b><span>설치하면 주소 입력 없이 아이콘으로 바로 열 수 있어요.</span>`)});
+  window.addEventListener("appinstalled",()=>{box.innerHTML=""});
+  if(iosSafari)show(`<b>홈 화면에 앱으로 추가하기</b><span>아래 <b style="display:inline">공유 버튼(□↑)</b> → <b style="display:inline">홈 화면에 추가</b>를 누르면 앱처럼 쓸 수 있어요.</span>`);
+  else if(inApp)show(`<b>앱으로 쓰려면 브라우저에서 열어 주세요</b><span>오른쪽 위(또는 아래) 메뉴에서 ‘다른 브라우저로 열기’를 누른 뒤 홈 화면에 추가하세요.</span>`);
+})();
 setInterval(()=>{if(!document.hidden&&state.tab==="schedule"&&!state.busy)load(true)},60000);
 </script>
 </body>
