@@ -210,7 +210,7 @@ const blankNew=()=>({name:"",roles:[],lockedCats:[],svcLock:{},prio:{}});
 const state={month:shiftMonth(monthKeyOf(new Date()),1),view:null,loading:true,error:"",loginMsg:"",formOwner:"",
   tab:"input",form:blankForm(),filter:"전체",editCell:null,volDraft:{},newVol:blankNew(),roleDraft:{},
   toast:"",toastErr:false,toastAt:"",busy:false,confirmDel:null,confirmReset:null,confirmUnlink:null,
-  linkPick:"",newReg:false,proxyId:"",evDraft:null,confirmEvDel:null,adminDraft:{}};
+  linkPick:"",newReg:false,proxyId:"",evDraft:null,confirmEvDel:null,adminDraft:{},adminPick:""};
 const V=()=>state.view;
 const isAdmin=()=>!!(V()&&V().admin);
 const myCats=()=>isAdmin()?V().admin.cats:[];
@@ -497,7 +497,7 @@ function renderSchedule(){
   ${calHtml()}
   ${admin?`<h2>${esc(mLabel(state.month))} 봉사 횟수${state.filter==="전체"?"":` · ${esc(state.filter)}`} <span class="scope">관리자만 보임</span></h2>
   <div class="tally wide">${list.map(([n,,t])=>`<div><b>${esc(n)}</b><span>${esc(t)}</span></div>`).join("")}</div>
-  <p class="hint" style="margin-top:14px">횟수는 봉사한 주일 수입니다(1부·2부를 모두 섬겨도 1회, 특별 일정은 넣지 않음). 가능·지난 2달 통계는 관리하는 팀 기준입니다. 배정 기준: 사람 구하기 어려운 칸부터 채우고, 이번 달·지난달·전전달에 덜 섬긴 사람과 지난주에 쉬었던 사람을 먼저 배정합니다. 찬양팀은 관리 탭에서 정한 배정 우선순위(자주·가끔)도 크게 반영합니다. 방송실은 하루에 한 부만, 찬양팀은 1부 팀이 2부에도 이어서 섬기도록 배정합니다.</p>`:""}`;
+  <p class="hint" style="margin-top:14px">횟수는 봉사한 주일 수입니다(1부·2부를 모두 섬겨도 1회, 특별 일정은 넣지 않음). 가능·지난 2달 통계는 관리하는 팀 기준입니다. 배정 기준: 사람 구하기 어려운 칸부터 채우고, 이번 달·지난달·전전달에 덜 섬긴 사람과 지난주에 쉬었던 사람을 먼저 배정합니다. 찬양팀은 관리 탭에서 정한 배정 우선순위(자주·가끔)도 크게 반영합니다. 방송팀은 하루에 한 부만, 찬양팀은 1부 팀이 2부에도 이어서 섬기도록 배정합니다.</p>`:""}`;
 }
 
 const blankEvent=()=>({id:"",name:"",date:"",teams:myCats().length===1?[...myCats()]:[],slots:[{k:"",label:"",start:"19:00",end:"20:30"}]});
@@ -534,26 +534,37 @@ function eventsAdminHtml(){
   </section>`;
 }
 
-// 관리자 지정 (전체 관리자만): 한 번이라도 카카오로 로그인한 계정이 목록에 나옵니다.
+// 관리자 지정 (전체 관리자만): 한 번이라도 카카오로 로그인한 계정 중에서 골라 권한을 정합니다.
 function usersAdminHtml(){
-  const users=V().users||[];
+  const users=[...(V().users||[])];
   const lvl=u=>u.admin?(u.admin.all?"all":"team"):"none";
-  const draft=u=>state.adminDraft[u.kakaoId]||{level:lvl(u),cats:u.admin&&!u.admin.all?[...u.admin.cats]:[]};
+  const nameOf=u=>u.volName||u.nickname||"(이름 없음)";
+  const lvlText=u=>u.admin?(u.admin.all?"전체 관리자":`${u.admin.cats.join("·")} 담당자`):"권한 없음";
+  users.sort((a,b)=>(lvl(a)==="none")-(lvl(b)==="none")||nameOf(a).localeCompare(nameOf(b),"ko"));
+  const admins=users.filter(u=>u.admin);
+  const u=users.find(x=>x.kakaoId===state.adminPick);
+  let detail="";
+  if(u){const d=state.adminDraft[u.kakaoId]||{level:lvl(u),cats:u.admin&&!u.admin.all?[...u.admin.cats]:[]},changed=!!state.adminDraft[u.kakaoId];
+    detail=`<div class="item" style="margin-top:10px">
+      <div><b>${esc(nameOf(u))}</b>${u.me?` <span class="lockmark">나</span>`:""}
+        <div class="meta">${u.volName&&u.nickname?`카카오 닉네임 ${esc(u.nickname)} · `:""}${u.volName?"봉사자 연결됨":"봉사자 미연결"}</div></div>
+      <div class="row">
+        <select class="small" id="adl-${esc(u.kakaoId)}" data-adlevel="${esc(u.kakaoId)}" aria-label="권한">
+          <option value="none" ${d.level==="none"?"selected":""}>권한 없음</option>
+          <option value="team" ${d.level==="team"?"selected":""}>팀 담당자</option>
+          <option value="all" ${d.level==="all"?"selected":""}>전체 관리자</option></select>
+        ${d.level==="team"?`<span class="chips sm">${V().cats.map(c=>`<button class="chip" data-adcat="${esc(c.name)}" data-adk="${esc(u.kakaoId)}" aria-pressed="${d.cats.includes(c.name)}">${esc(c.name)}</button>`).join("")}</span>`:""}
+        <button class="btn small" data-adsave="${esc(u.kakaoId)}" ${changed?"":"disabled"}>저장</button>
+      </div></div>`}
+  detail+=`<div class="row" style="margin-top:6px">${toastHtml("ad")}</div>`;
   return `<section class="panel" style="margin-top:20px">
     <h2>관리자 지정</h2>
-    <p class="hint">카카오로 한 번 이상 로그인한 계정이 나와요. 팀 담당자는 자기 팀의 역할·봉사자·스케줄·특별 일정만 관리할 수 있어요.</p>
-    <div class="list" style="margin-top:12px">${users.map(u=>{const d=draft(u),changed=!!state.adminDraft[u.kakaoId];
-      return `<div class="item">
-        <div><b>${esc(u.volName||u.nickname||"(이름 없음)")}</b>${u.me?` <span class="lockmark">나</span>`:""}
-          <div class="meta">${u.volName&&u.nickname?`카카오 닉네임 ${esc(u.nickname)} · `:""}${u.volName?"봉사자 연결됨":"봉사자 미연결"}</div></div>
-        <div class="row">
-          <select class="small" id="adl-${esc(u.kakaoId)}" data-adlevel="${esc(u.kakaoId)}">
-            <option value="none" ${d.level==="none"?"selected":""}>권한 없음</option>
-            <option value="team" ${d.level==="team"?"selected":""}>팀 담당자</option>
-            <option value="all" ${d.level==="all"?"selected":""}>전체 관리자</option></select>
-          ${d.level==="team"?`<span class="chips sm">${V().cats.map(c=>`<button class="chip" data-adcat="${esc(c.name)}" data-adk="${esc(u.kakaoId)}" aria-pressed="${d.cats.includes(c.name)}">${esc(c.name)}</button>`).join("")}</span>`:""}
-          ${changed?`<button class="btn small" data-adsave="${esc(u.kakaoId)}">저장</button>`:""}
-        </div></div>`}).join("")||`<p class="hint">아직 로그인한 계정이 없어요.</p>`}</div>
+    <p class="hint">카카오로 한 번 이상 로그인한 계정 중에서 골라요. 팀 담당자는 자기 팀의 역할·봉사자·스케줄·특별 일정만 관리할 수 있어요.</p>
+    ${admins.length?`<p class="meta" style="margin:10px 0 0">현재 관리자: ${admins.map(a=>`${esc(nameOf(a))}(${esc(a.admin.all?"전체":a.admin.cats.join("·"))})`).join(", ")}</p>`:""}
+    ${users.length?`<label class="field" style="margin:12px 0 0"><span class="label">계정 선택</span>
+      <select id="adPick"><option value="">계정을 고르세요 (${users.length}명)</option>
+        ${users.map(x=>`<option value="${esc(x.kakaoId)}" ${x.kakaoId===state.adminPick?"selected":""}>${esc(nameOf(x))}${x.me?" (나)":""} · ${esc(lvlText(x))}</option>`).join("")}</select></label>
+      ${detail}`:`<p class="hint">아직 로그인한 계정이 없어요.</p>`}
   </section>`;
 }
 
@@ -739,8 +750,8 @@ document.addEventListener("click",async e=>{
     const f=$("#evAdmin");if(f)f.scrollIntoView({block:"start"});return}
   if(t.dataset.adsave){const k=t.dataset.adsave,d=state.adminDraft[k];if(!d)return;
     const admin=d.level==="all"?{all:true}:d.level==="team"&&d.cats.length?{cats:d.cats}:null;
-    if(d.level==="team"&&!d.cats.length)return flash("담당할 팀을 하나 이상 골라 주세요.",true);
-    if(await run("admin/setAdmin",{month:M,kakaoId:k,admin},"관리자 권한을 저장했어요.")){delete state.adminDraft[k];render()}return}
+    if(d.level==="team"&&!d.cats.length)return flash("담당할 팀을 하나 이상 골라 주세요.",true,"ad");
+    if(await run("admin/setAdmin",{month:M,kakaoId:k,admin},"관리자 권한을 저장했어요.","ad")){delete state.adminDraft[k];render()}return}
   if(t.dataset.adcat){const k=t.dataset.adk,u=(V().users||[]).find(x=>x.kakaoId===k);if(!u)return;
     const d=state.adminDraft[k]||(state.adminDraft[k]={level:"team",cats:u.admin&&!u.admin.all?[...u.admin.cats]:[]});d.cats=toggle(d.cats,t.dataset.adcat);return render()}
   if(t.dataset.evteam){const d=state.evDraft;d.teams=toggle(d.teams,t.dataset.evteam);return render()}
@@ -766,6 +777,7 @@ document.addEventListener("click",async e=>{
 document.addEventListener("change",e=>{
   const t=e.target;
   if(t.id==="linkWho"){state.linkPick=t.value;state.toast="";render()}
+  if(t.id==="adPick"){state.adminPick=t.value;return render()}
   if(t.dataset.adlevel){const k=t.dataset.adlevel,u=(V().users||[]).find(x=>x.kakaoId===k);if(!u)return;
     const d=state.adminDraft[k]||(state.adminDraft[k]={level:"none",cats:u.admin&&!u.admin.all?[...u.admin.cats]:[]});d.level=t.value;render()}
   if(t.id==="proxyWho"){state.proxyId=t.value;state.toast="";if(t.value)loadProxyForm();else{const mv=V().me&&V().me.vol;state.form=mv?formFrom(mv):blankForm();state.formOwner=mv?mv.id:""}render()}

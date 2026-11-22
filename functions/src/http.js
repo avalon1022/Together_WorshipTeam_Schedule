@@ -52,6 +52,7 @@ async function handle(env, req, res) {
   const { deps } = env;
 
   try {
+    await S.migrate(deps);
     // ---------- 카카오 로그인 ----------
     if (method === 'GET' && path === '/auth/kakao/login') {
       if (!env.kakao.restKey) return redirect(res, '/?login_error=' + encodeURIComponent('카카오 로그인이 아직 설정되지 않았어요.'));

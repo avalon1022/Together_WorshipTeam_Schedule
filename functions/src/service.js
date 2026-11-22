@@ -46,6 +46,55 @@ function ctxOf(data, config) {
 const adminOf = u => (u && u.admin && (u.admin.all || (u.admin.cats || []).length) ? { all: !!u.admin.all, cats: u.admin.all ? [] : (u.admin.cats || []) } : null);
 const hasSuper = data => Object.values(data.users).some(u => u.admin && u.admin.all);
 
+/* ---------- 팀 이름 변경 반영 ---------- */
+// config.RENAMED_CATEGORIES에 있는 예전 팀 이름을 저장된 모든 데이터에서 새 이름으로 바꿉니다.
+// 서버가 켜진 뒤 첫 요청에서 한 번만 확인하고, 바꿀 것이 없으면 아무것도 쓰지 않습니다.
+function renameCats(tx, map) {
+  const nm = c => (Object.prototype.hasOwnProperty.call(map, c) ? map[c] : c);
+  const keys = o => { const r = {}; Object.keys(o || {}).forEach(k => { r[nm(k)] = o[k]; }); return r; };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const d = tx.data;
+  const roles = (d.roles || []).map(r => Object.assign({}, r, { cat: nm(r.cat) }));
+  if (!same(roles, d.roles || [])) tx.setRoles(roles);
+  Object.values(d.vols).forEach(v => {
+    const n = Object.assign({}, v);
+    if (v.lockedCats) n.lockedCats = uniq(v.lockedCats.map(nm));
+    if (v.svcLock) n.svcLock = keys(v.svcLock);
+    if (v.prio) n.prio = keys(v.prio);
+    if (!same(n, v)) tx.putVol(n);
+  });
+  Object.values(d.events).forEach(e => {
+    const n = Object.assign({}, e, { teams: uniq((e.teams || []).map(nm)) });
+    if (!same(n, e)) tx.putEvent(n);
+  });
+  Object.keys(d.months).forEach(m => {
+    const doc = d.months[m] || {};
+    if (!doc.finals) return;
+    const n = Object.assign({}, doc, { finals: keys(doc.finals) });
+    if (!same(n, doc)) tx.putMonth(m, n);
+  });
+  Object.values(d.users).forEach(u => {
+    if (!u.admin || !u.admin.cats) return;
+    const n = Object.assign({}, u, { admin: Object.assign({}, u.admin, { cats: uniq(u.admin.cats.map(nm)) }) });
+    if (!same(n, u)) tx.putUser(n);
+  });
+  Object.keys(d.calendar).forEach(k => {
+    const [m, c] = k.split('|');
+    if (nm(c) === c) return;
+    const nk = m + '|' + nm(c);
+    tx.putCal(nk, d.calendar[nk] ? { map: Object.assign({}, d.calendar[k].map, d.calendar[nk].map) } : d.calendar[k]);
+    tx.putCal(k, null);
+  });
+}
+async function migrate(deps) {
+  const map = deps.config.RENAMED_CATEGORIES || {};
+  if (!Object.keys(map).length || deps.store.catsChecked) return;
+  try {
+    await deps.store.transact(tx => renameCats(tx, map));
+    deps.store.catsChecked = true;
+  } catch (e) { console.error('팀 이름 변경 반영 실패', e); }
+}
+
 /* ---------- 보기 ---------- */
 async function view(deps, auth, q) {
   const data = await deps.store.read();
@@ -423,4 +472,4 @@ async function syncCalendarSafe(deps, month, cat) {
   catch (e) { return `스케줄은 저장됐지만 구글 캘린더에 반영하지 못했어요: ${e.message}`; }
 }
 
-module.exports = { ctxOf, view, recordLogin, linkMine, saveMine, setup, adminAction, syncCalendar, ADMIN };
+module.exports = { ctxOf, migrate, view, recordLogin, linkMine, saveMine, setup, adminAction, syncCalendar, ADMIN };
