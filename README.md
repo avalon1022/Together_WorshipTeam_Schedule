@@ -14,13 +14,27 @@
 Mac 기준입니다. 처음 한 번만 하면 되고, 1~2시간 정도 걸립니다.
 
 ### 0. 준비물
-1. **Node.js 20**: [nodejs.org](https://nodejs.org)에서 LTS 버전을 내려받아 설치합니다.
-2. **터미널**을 열고 Firebase 도구를 설치합니다.
+Firebase 도구는 **Node.js 24**에서 씁니다. (Node 26처럼 너무 새 버전은 아직 지원하지 않습니다.)
+관리자 권한(sudo) 없이 버전을 맞추기 위해 **nvm**으로 설치하는 것을 권합니다.
+
+1. 터미널에서 nvm을 설치합니다.
+   ```bash
+   touch ~/.zshrc
+   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.41.0/install.sh | bash
+   ```
+   "명령줄 개발자 도구를 설치하겠습니까?" 창이 뜨면 **설치**를 누르고, 끝난 뒤 위 명령을 다시 실행합니다.
+2. **터미널을 완전히 닫았다가 다시 엽니다.** 그다음 Node 24를 설치합니다.
+   ```bash
+   nvm install 24
+   nvm alias default 24
+   node -v          # v24.x.x 가 나오면 성공
+   ```
+3. Firebase 도구를 설치하고 로그인합니다. (nvm으로 설치한 Node에서는 sudo가 필요 없습니다)
    ```bash
    npm install -g firebase-tools
    firebase login
    ```
-3. 이 저장소를 내려받습니다.
+4. 이 저장소를 내려받습니다.
    ```bash
    git clone https://github.com/avalon1022/Together_WorshipTeam_Schedule.git
    cd Together_WorshipTeam_Schedule
@@ -143,6 +157,8 @@ node test/run.js            # 서버 시험
 ## 문제 해결
 | 증상 | 원인과 해결 |
 |---|---|
+| `npm install -g` 때 `EACCES: permission denied` | 시스템에 설치된 Node를 쓰고 있습니다. 0단계대로 nvm으로 Node 24를 설치한 뒤 다시 실행하세요. |
+| `EBADENGINE … current: { node: 'v26…' }` | Node가 너무 새 버전입니다. `nvm use 24`(또는 0단계) 후 다시 실행하세요. |
 | 배포 때 `Blaze plan` 관련 오류 | 1-2단계의 Blaze 요금제 전환을 하지 않았습니다. |
 | 배포 때 secret 관련 오류 | 4단계의 비밀 값 세 개를 모두 등록해야 합니다. |
 | "카카오 로그인 설정이 필요해요" | `functions/.env`의 `KAKAO_REST_API_KEY`가 비어 있습니다. 넣고 다시 배포하세요. |

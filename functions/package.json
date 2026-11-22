@@ -3,7 +3,7 @@
   "private": true,
   "description": "주일 예배팀 스케줄 서버 (Firebase Cloud Functions)",
   "main": "index.js",
-  "engines": { "node": "20" },
+  "engines": { "node": "24" },
   "scripts": {
     "test": "node ../test/run.js",
     "serve": "firebase emulators:start --only functions,hosting,firestore",
