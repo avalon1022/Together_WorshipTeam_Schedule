@@ -326,6 +326,13 @@ ADMIN.setFinal = (tx, ctx, admin, b, month) => {
   return { sync: [[month, cat]] };
 };
 
+// 확정된 스케줄을 구글 캘린더에 다시 올립니다 (캘린더를 나중에 연결했거나, 캘린더에서 일정을 지웠을 때)
+ADMIN.syncCalendar = (tx, ctx, admin, b, month) => {
+  const cats = L.editableCats(ctx, admin).filter(c => ctx.confirmed[month + '|' + c] || tx.data.calendar[month + '|' + c]);
+  if (!cats.length) fail('이 달에는 확정된 스케줄이 없어요. 먼저 팀 스케줄을 확정해 주세요.');
+  return { sync: cats.map(c => [month, c]) };
+};
+
 ADMIN.unsetFinal = (tx, ctx, admin, b, month) => {
   const cat = L.checkCat(ctx, b.cat);
   L.needCat(ctx, admin, cat);
@@ -412,6 +419,7 @@ async function adminAction(deps, auth, action, body) {
   needLogin(auth);
   const fn = Object.prototype.hasOwnProperty.call(ADMIN, action) ? ADMIN[action] : null;
   if (!fn) fail('알 수 없는 요청이에요.', 'not_found');
+  if (action === 'syncCalendar' && !deps.calendar) fail('구글 캘린더가 아직 연결되지 않았어요. CALENDAR_ID를 넣고 다시 배포해 주세요.');
   const month = L.checkMonth(body.month);
   const res = await deps.store.transact(tx => {
     const admin = adminOf(tx.data.users[auth.kakaoId]);

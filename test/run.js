@@ -143,6 +143,12 @@ const L = require('../functions/src/logic');
   ok(r.json.schedule.finalCats.length === 2 && calCount() === dec.length * 4, '찬양팀 admin finalizes own team');
   r = await S.call('POST', '/api/admin/unsetFinal', { cookie: A.cookie, body: { month: M, cat: '방송팀' } });
   ok(calCount() === dec.length * 2 && Object.values(S.calendar.events).every(e => e.summary.includes('찬양팀')), 'unfinalize removes only that team');
+  // 캘린더에서 일정을 지운 뒤 다시 반영
+  Object.keys(S.calendar.events).forEach(k => delete S.calendar.events[k]);
+  r = await S.call('POST', '/api/admin/syncCalendar', { cookie: B.cookie, body: { month: M } });
+  ok(r.status === 200 && !r.json.notice && calCount() === dec.length * 2, 'resync recreates confirmed team events');
+  r = await S.call('POST', '/api/admin/syncCalendar', { cookie: A.cookie, body: { month: '2027-03' } });
+  ok(r.status === 400, 'resync with nothing confirmed explains');
 
   /* ---------- 이벤트 ---------- */
   r = await S.call('GET', '/api/view?month=' + M, { cookie: A.cookie });
@@ -265,6 +271,14 @@ const L = require('../functions/src/logic');
     const v0 = S4.adapter.v;
     await S4.call('GET', '/api/view?month=' + M);
     ok(S4.adapter.v === v0, 'migration runs once, no extra writes');
+  }
+
+  {
+    const S5 = makeServer({ kakaoUsers, noCalendar: true });
+    const X = await S5.login('c1');
+    await S5.call('POST', '/api/setup', { cookie: X.cookie, body: { month: M, code: 'SETUP-123' } });
+    const r5 = await S5.call('POST', '/api/admin/syncCalendar', { cookie: X.cookie, body: { month: M } });
+    ok(r5.status === 400 && /CALENDAR_ID/.test(r5.json.error), 'resync without calendar explains');
   }
 
   summary();
