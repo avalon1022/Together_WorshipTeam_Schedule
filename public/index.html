@@ -209,7 +209,7 @@ const formFrom=v=>({id:v.id,name:v.name,roles:[...v.roles],dates:[...(v.dates||[
 const blankNew=()=>({name:"",roles:[],lockedCats:[],svcLock:{}});
 const state={month:shiftMonth(monthKeyOf(new Date()),1),view:null,loading:true,error:"",loginMsg:"",formOwner:"",
   tab:"input",form:blankForm(),filter:"전체",editCell:null,volDraft:{},newVol:blankNew(),roleDraft:{},
-  toast:"",toastErr:false,busy:false,confirmDel:null,confirmReset:null,confirmUnlink:null,
+  toast:"",toastErr:false,toastAt:"",busy:false,confirmDel:null,confirmReset:null,confirmUnlink:null,
   linkPick:"",newReg:false,proxyId:"",evDraft:null,confirmEvDel:null,adminDraft:{}};
 const V=()=>state.view;
 const isAdmin=()=>!!(V()&&V().admin);
@@ -245,11 +245,11 @@ function setView(v){state.view=v;state.volDraft={};
   }
 }
 // 관리자 작업: path는 "admin/setFinal" 같은 형태
-async function run(path,body,okMsg){
+async function run(path,body,okMsg,at){
   state.busy=true;
   try{const v=await api("/api/"+path,body);setView(v);state.busy=false;render();
-    if(v.notice)flash(v.notice,true);else if(okMsg)flash(okMsg);return true}
-  catch(e){state.busy=false;if(!authError(e)){render();flash(e.message,true)}return false}
+    if(v.notice)flash(v.notice,true,at);else if(okMsg)flash(okMsg,false,at);return true}
+  catch(e){state.busy=false;if(!authError(e)){render();flash(e.message,true,at)}return false}
 }
 
 /* ---------- 렌더 ---------- */
@@ -267,7 +267,8 @@ function render(){
     $("#view").innerHTML=`<div class="panel empty"><b>${state.error?"불러오지 못했어요":"불러오는 중…"}</b></div>`;return}
   ({input:renderInput,schedule:renderSchedule,settings:renderSettings})[state.tab]();
 }
-const toastHtml=()=>`<span class="toast${state.toastErr?" err":""}" id="toast">${esc(state.toast)}</span>`;
+// 안내 문구는 한 곳에만 나옵니다. at을 주면 그 자리(예: "ev" = 특별 일정 칸)에 나와요.
+const toastHtml=(at="")=>(state.toastAt||"")===at?`<span class="toast${state.toastErr?" err":""}" id="toast" role="status">${esc(state.toast)}</span>`:"";
 const lockMark=t=>`<span class="lockmark">${esc(t)}</span>`;
 function roleBlocks(sel,attr,lockedCats,cats){
   return (cats||V().cats.map(c=>c.name)).map(cat=>{const locked=(lockedCats||[]).includes(cat);
@@ -458,7 +459,7 @@ function renderSchedule(){
   const cellHtml=(d,s,r,first,teams)=>{
     if(teams&&!teams.includes(r.cat))return `<td${first?' class="first"':""}><span class="na">—</span></td>`;
     const ps=cellPeople(slots,d,s,r.name);const miss=r.count-ps.length;
-    const inner=`${ps.map(p=>`<span class="name">${esc(p.name)}${admin&&p.manual?`<span class="tag">수동</span>`:""}</span>`).join("")}${miss>0?`<span class="gap">${miss}명 부족</span>`:""}`;
+    const inner=`${ps.map(p=>`<span class="name">${esc(p.name)}${admin&&p.manual?`<span class="tag">수동</span>`:""}</span>`).join("")}${admin&&miss>0?`<span class="gap">${miss}명 부족</span>`:""}`;
     const cls=first?' class="first"':"";
     if(!editable(r.cat))return `<td${cls}>${inner}</td>`;
     const on=state.editCell&&state.editCell.d===d&&state.editCell.s===s&&state.editCell.role===r.name;
@@ -525,9 +526,9 @@ function eventsAdminHtml(){
           <input type="time" id="eve${i}" data-evs="${i}" data-k="end" value="${esc(sl.end)}" aria-label="끝">
           ${d.slots.length>1?`<button class="icon-btn" data-evsdel="${i}" aria-label="시간대 삭제">×</button>`:""}</div>`).join("")}
         <div><button class="btn ghost small" id="evAddSlot" ${d.slots.length>=6?"disabled":""}>시간대 추가</button></div></div>
-      <div class="row"><button class="btn" id="evSave" ${state.busy?"disabled":""}>${d.id?"수정 저장":"만들기"}</button><button class="btn ghost" id="evCancel">취소</button></div>
+      <div class="row"><button class="btn" id="evSave" ${state.busy?"disabled":""}>${d.id?"수정 저장":"만들기"}</button><button class="btn ghost" id="evCancel">취소</button>${toastHtml("ev")}</div>
       <p class="hint">이미 확정된 달에 일정을 추가하거나 바꾸면, 해당 팀을 다시 확정해야 구글 캘린더에 올라가요.</p>
-    </div>`:`<button class="btn" id="evNew">특별 일정 만들기</button>`}
+    </div>`:`<div class="row"><button class="btn" id="evNew">특별 일정 만들기</button>${toastHtml("ev")}</div>`}
   </section>`;
 }
 
@@ -631,7 +632,9 @@ function renderSettings(){
 }
 
 /* ---------- 동작 ---------- */
-function flash(msg,err){state.toast=msg;state.toastErr=!!err;const t=$("#toast");if(t){t.textContent=msg;t.className="toast"+(err?" err":"")}
+function flash(msg,err,at=""){const moved=(state.toastAt||"")!==at;state.toast=msg;state.toastErr=!!err;state.toastAt=at;
+  if(moved)render();
+  const t=$("#toast");if(t){t.textContent=msg;t.className="toast"+(err?" err":"");if(at)t.scrollIntoView({block:"nearest",behavior:"smooth"})}
   clearTimeout(flash.t);flash.t=setTimeout(()=>{state.toast="";const t=$("#toast");if(t)t.textContent=""},err?6000:3500)}
 const draftOf=key=>key==="new"?state.newVol:state.volDraft[key];
 
@@ -684,7 +687,7 @@ document.addEventListener("click",async e=>{
   const t=e.target.closest("button");if(!t||t.disabled)return;
   const M=state.month;
   if(t.id==="prevM"||t.id==="nextM"){state.month=shiftMonth(M,t.id==="prevM"?-1:1);state.confirmDel=state.confirmReset=null;state.editCell=null;return load(false)}
-  if(t.dataset.tab){state.tab=t.dataset.tab;state.toast="";state.roleDraft={};state.editCell=null;state.evDraft=null;return render()}
+  if(t.dataset.tab){state.tab=t.dataset.tab;state.toast="";state.toastAt="";state.roleDraft={};state.editCell=null;state.evDraft=null;return render()}
   if(t.dataset.filter){state.filter=t.dataset.filter;state.editCell=null;return render()}
   if(t.id==="kakaoLogout")return logoutKakao("");
   if(t.id==="linkSave")return linkMine();
@@ -740,14 +743,14 @@ document.addEventListener("click",async e=>{
   if(t.id==="evAddSlot"){const d=state.evDraft,last=d.slots[d.slots.length-1]||{};d.slots.push({k:"",label:"",start:last.end||"19:00",end:""});return render()}
   if(t.dataset.evsdel){state.evDraft.slots.splice(+t.dataset.evsdel,1);return render()}
   if(t.id==="evSave"){const d=state.evDraft;
-    if(!d.name.trim())return flash("이벤트 이름을 입력해 주세요.",true);
-    if(!d.date)return flash("날짜를 골라 주세요.",true);
-    if(!d.teams.length)return flash("필요한 팀을 하나 이상 골라 주세요.",true);
-    if(d.slots.some(sl=>!sl.start))return flash("시간대마다 시작 시간을 넣어 주세요.",true);
+    if(!d.name.trim())return flash("이벤트 이름을 입력해 주세요.",true,"ev");
+    if(!d.date)return flash("날짜를 골라 주세요.",true,"ev");
+    if(!d.teams.length)return flash("필요한 팀을 하나 이상 골라 주세요.",true,"ev");
+    if(d.slots.some(sl=>!sl.start))return flash("시간대마다 시작 시간을 넣어 주세요.",true,"ev");
     const ym=d.date.slice(0,7);
-    if(await run("admin/saveEvent",{month:M,event:d},`‘${d.name.trim()}’ 일정을 ${d.id?"수정했어요":"만들었어요"}.${ym!==M?` ${mLabel(ym)}로 넘어가면 볼 수 있어요.`:""}`)){state.evDraft=null;render()}return}
+    if(await run("admin/saveEvent",{month:M,event:d},`‘${d.name.trim()}’ 일정을 ${d.id?"수정했어요":"만들었어요"}.${ym!==M?` ${mLabel(ym)}로 넘어가면 볼 수 있어요.`:""}`,"ev")){state.evDraft=null;render()}return}
   if(t.dataset.evdel){const id=t.dataset.evdel;if(state.confirmEvDel!==id){state.confirmEvDel=id;return render()}
-    state.confirmEvDel=null;return run("admin/deleteEvent",{month:M,id},"특별 일정을 삭제했어요.")}
+    state.confirmEvDel=null;return run("admin/deleteEvent",{month:M,id},"특별 일정을 삭제했어요.","ev")}
   if(t.dataset.addrole){state.roleDraft[t.dataset.addrole].push({name:"",count:1});return render()}
   if(t.dataset.rdel){state.roleDraft[t.dataset.rdel].splice(+t.dataset.ri,1);return render()}
   if(t.dataset.saveroles){const c=t.dataset.saveroles;
