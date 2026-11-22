@@ -262,7 +262,10 @@ ADMIN.saveRoles = (tx, ctx, admin, b) => {
   const others = ctx.roles.filter(r => r.cat !== cat);
   const clash = clean.find(r => others.some(o => o.name === r.name));
   if (clash) fail(`'${clash.name}' 역할은 ${others.find(o => o.name === clash.name).cat}에 이미 있어요. 다른 이름을 써 주세요.`);
-  tx.setRoles(others.concat(clean));
+  // 팀 순서(config)는 그대로 두고, 이 팀의 역할만 보내온 순서대로 바꿉니다.
+  const order = ctx.cats.map(c => c.name);
+  const rest = others.filter(r => order.indexOf(r.cat) < 0);
+  tx.setRoles([].concat(...order.map(c => (c === cat ? clean : others.filter(r => r.cat === c))), rest));
 };
 
 function cellRole(ctx, admin, role, month, date, svc) {

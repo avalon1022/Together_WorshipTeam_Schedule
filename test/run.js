@@ -274,6 +274,14 @@ const L = require('../functions/src/logic');
   }
 
   {
+    const S6 = makeServer({ kakaoUsers, noCalendar: true });
+    const X = await S6.login('c1');
+    await S6.call('POST', '/api/setup', { cookie: X.cookie, body: { month: M, code: 'SETUP-123' } });
+    const r6 = await S6.call('POST', '/api/admin/saveRoles', { cookie: X.cookie, body: { month: M, cat: '방송팀', roles: [{ name: '자막', count: 1 }, { name: '영상 송출', count: 1 }, { name: '음향', count: 2 }] } });
+    ok(r6.json.roles.map(x => x.name).join() === '자막,영상 송출,음향,인도,싱어,건반,드럼', 'role reorder keeps team order');
+    ok(Object.keys(r6.json.schedule.slots[dec[0]]['1']).slice(0, 3).join() === '자막,영상 송출,음향', 'schedule follows role order');
+  }
+  {
     const S5 = makeServer({ kakaoUsers, noCalendar: true });
     const X = await S5.login('c1');
     await S5.call('POST', '/api/setup', { cookie: X.cookie, body: { month: M, code: 'SETUP-123' } });
