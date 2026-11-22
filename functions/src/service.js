@@ -7,6 +7,7 @@
  *   calendarLinks: { google, ical } 또는 null,
  *   kakaoReady: boolean,
  *   setupCode: 관리자 설정 코드(비어 있으면 첫 관리자 설정 불가),
+ *   push: { publicKey, send(sub, payload), recent: Map } 또는 null(알림 안 씀),
  * }
  * auth = { kakaoId } 또는 null
  */
@@ -16,6 +17,7 @@ const crypto = require('crypto');
 const L = require('./logic');
 const { eventTimes } = require('./calendar');
 const { safeEq } = require('./auth');
+const P = require('./push');
 
 const { fail, uniq } = L;
 const nowIso = () => new Date().toISOString();
@@ -119,6 +121,9 @@ async function view(deps, auth, q) {
           const vol = ctx.vols.find(y => y.kakaoId === x.kakaoId);
           return { kakaoId: x.kakaoId, nickname: x.nickname || '', volName: vol ? vol.name : '', admin: adminOf(x), lastLogin: x.lastLogin || '', me: x.kakaoId === auth.kakaoId };
         }).sort((a, b) => (b.admin ? 1 : 0) - (a.admin ? 1 : 0) || (a.volName || a.nickname).localeCompare(b.volName || b.nickname, 'ko'));
+        v.push = deps.push
+          ? { publicKey: deps.push.publicKey, devices: Object.values(data.push).filter(s => s.kakaoId === auth.kakaoId).length, remindDay: (deps.config.REMIND || {}).day || 20 }
+          : null;
       }
     }
   }
@@ -139,14 +144,16 @@ function needLogin(auth) { if (!auth) fail('로그인이 필요해요. 카카오
 // 처음 로그인한 사람이 목록에 있는 자기 이름과 카카오 계정을 연결합니다.
 async function linkMine(deps, auth, body) {
   needLogin(auth);
-  await deps.store.transact(tx => {
+  const linked = await deps.store.transact(tx => {
     const vols = Object.values(tx.data.vols);
     if (vols.some(v => v.kakaoId === auth.kakaoId)) fail('이 카카오 계정은 이미 다른 이름과 연결돼 있어요.');
     const v = tx.data.vols[String(body.volId || '')];
     if (!v) fail('봉사자를 찾을 수 없어요. 새로고침해 주세요.');
     if (v.kakaoId) fail(`'${v.name}'님은 이미 다른 카카오 계정과 연결돼 있어요. 본인이라면 관리자에게 연결 해제를 요청해 주세요.`);
     tx.putVol(Object.assign({}, v, { kakaoId: auth.kakaoId, updatedAt: nowIso() }));
+    return v;
   });
+  await notifySafe(deps, { title: '새 봉사자 연결', body: `${linked.name}님이 카카오 계정으로 이름을 연결했어요.`, url: '/?tab=settings', tag: 'vol-' + linked.id }, { except: auth.kakaoId });
   return view(deps, auth, { month: body.month });
 }
 
@@ -161,7 +168,7 @@ async function saveMine(deps, auth, body) {
   const name = L.cleanName(body.name);
   const touched = (Array.isArray(body.touched) ? body.touched : []).map(String).filter(m => /^\d{4}-\d{2}$/.test(m));
   const dates = L.cleanSlots(body.dates).filter(x => touched.indexOf(x.slice(0, 7)) >= 0);
-  await deps.store.transact(tx => {
+  const saved = await deps.store.transact(tx => {
     const ctx = ctxOf(tx.data, deps.config);
     const roleCat = {};
     ctx.roles.forEach(r => { roleCat[r.name] = r.cat; });
@@ -171,6 +178,7 @@ async function saveMine(deps, auth, body) {
       fail(v ? `'${name}' 이름은 다른 봉사자가 쓰고 있어요.`
         : `'${name}' 이름이 이미 목록에 있어요. 본인이라면 '목록에서 내 이름 찾기'로 연결해 주세요.`);
     }
+    const isNew = !v;
     v = v ? Object.assign({}, v) : { id: newId(), roles: [], dates: [], lockedCats: [], svcLock: {}, kakaoId: auth.kakaoId };
     const locked = v.lockedCats || [];
     const asked = (Array.isArray(body.roles) ? body.roles : []).map(String).filter(r => roleCat[r]);
@@ -179,9 +187,22 @@ async function saveMine(deps, auth, body) {
     v.name = name;
     v.roles = uniq(roles);
     v.dates = uniq((v.dates || []).filter(x => touched.indexOf(x.slice(0, 7)) < 0).concat(dates)).sort();
+    v.savedMonths = uniq((v.savedMonths || []).concat(touched)).sort().slice(-24);
     v.updatedAt = nowIso();
     tx.putVol(v);
+    return { v, isNew, teams: uniq(v.roles.map(r => roleCat[r])) };
   });
+  const { v, isNew, teams } = saved;
+  const mLabel = m => +m.slice(5) + '월';
+  const months = touched.slice().sort();
+  const n = v.dates.filter(x => months.indexOf(x.slice(0, 7)) >= 0).length;
+  const what = months.length ? `${months.map(mLabel).join('·')} 가능 예배 ${n}회` : '';
+  if (isNew) {
+    await notifySafe(deps, { title: '새 봉사자 가입', body: `${v.name}님이 가입했어요 (${teams.join('·')})${what ? '. ' + what : ''}`, url: '/?tab=settings&month=' + month, tag: 'vol-' + v.id }, { except: auth.kakaoId });
+  } else if (months.length) {
+    await notifySafe(deps, { title: '봉사 일정 입력', body: `${v.name}님이 ${what}를 저장했어요.`, url: '/?tab=settings&month=' + (months[0] || month), tag: 'vol-' + v.id },
+      { except: auth.kakaoId, throttleKey: 'dates:' + v.id });
+  }
   return view(deps, auth, { month });
 }
 
@@ -243,7 +264,11 @@ ADMIN.saveDates = (tx, ctx, admin, b, month) => {
   const cur = tx.data.vols[String(b.id)];
   if (!cur) fail('봉사자를 찾을 수 없어요.');
   const mine = L.cleanSlots(b.dates).filter(x => x.indexOf(month) === 0);
-  tx.putVol(Object.assign({}, cur, { dates: uniq((cur.dates || []).filter(x => x.indexOf(month) !== 0).concat(mine)).sort(), updatedAt: nowIso() }));
+  tx.putVol(Object.assign({}, cur, {
+    dates: uniq((cur.dates || []).filter(x => x.indexOf(month) !== 0).concat(mine)).sort(),
+    savedMonths: uniq((cur.savedMonths || []).concat([month])).sort().slice(-24),
+    updatedAt: nowIso(),
+  }));
 };
 
 ADMIN.deleteVolunteer = (tx, ctx, admin, b) => {
@@ -435,9 +460,113 @@ async function adminAction(deps, auth, action, body) {
     const n = await syncCalendarSafe(deps, m, c);
     if (n) notes.push(n);
   }
+  if (action === 'setFinal' || action === 'unsetFinal') {
+    const data = await deps.store.read();
+    const vol = Object.values(data.vols).find(x => x.kakaoId === auth.kakaoId);
+    const who = (vol && vol.name) || ((data.users[auth.kakaoId] || {}).nickname) || '관리자';
+    const cat = String(body.cat || '');
+    await notifySafe(deps, action === 'setFinal'
+      ? { title: '스케줄 확정', body: `${who}님이 ${+month.slice(5)}월 ${cat} 스케줄을 확정했어요.`, url: `/?tab=schedule&month=${month}`, tag: `final-${month}-${cat}` }
+      : { title: '스케줄 확정 해제', body: `${who}님이 ${+month.slice(5)}월 ${cat} 스케줄 확정을 해제했어요.`, url: `/?tab=schedule&month=${month}`, tag: `final-${month}-${cat}` },
+    { except: auth.kakaoId });
+  }
   const v = await view(deps, auth, { month });
   if (notes.length) v.notice = notes.join(' ');
   return v;
+}
+
+/* ---------- 관리자 푸시 알림 (전체 관리자만 받음) ---------- */
+// msg = { title, body, url, tag }, opt = { except: 보내지 않을 카카오 회원번호, to: [받을 회원번호], throttleKey, throttleMs }
+async function notify(deps, msg, opt) {
+  opt = opt || {};
+  if (!deps.push) return 0;
+  if (opt.throttleKey) {
+    const recent = deps.push.recent || (deps.push.recent = new Map());
+    const t = recent.get(opt.throttleKey);
+    if (t && Date.now() - t < (opt.throttleMs || 10 * 60 * 1000)) return 0;
+    recent.set(opt.throttleKey, Date.now());
+  }
+  const data = await deps.store.read();
+  const to = new Set(opt.to || Object.values(data.users).filter(u => u.admin && u.admin.all && u.kakaoId !== opt.except).map(u => u.kakaoId));
+  const subs = Object.values(data.push).filter(s => to.has(s.kakaoId));
+  if (!subs.length) return 0;
+  const payload = JSON.stringify({ title: msg.title, body: msg.body, url: msg.url || '/', tag: msg.tag || '' });
+  const gone = [];
+  let sent = 0;
+  await Promise.all(subs.map(async s => {
+    try { await P.withTimeout(deps.push.send({ endpoint: s.endpoint, keys: s.keys }, payload), 8000); sent++; }
+    catch (e) {
+      if (e && (e.statusCode === 404 || e.statusCode === 410)) gone.push(s.id); // 알림을 끈 기기
+      else console.error('푸시 알림 실패', (e && (e.statusCode || e.message)) || e);
+    }
+  }));
+  if (gone.length) await deps.store.transact(tx => { gone.forEach(id => { if (tx.data.push[id]) tx.delPush(id); }); });
+  return sent;
+}
+async function notifySafe(deps, msg, opt) {
+  try { return await notify(deps, msg, opt); } catch (e) { console.error('푸시 알림 오류', e); return 0; }
+}
+
+function needSuper(data, auth) {
+  needLogin(auth);
+  const u = data.users[auth.kakaoId];
+  if (!u || !u.admin || !u.admin.all) fail('알림은 전체 관리자만 받을 수 있어요.', 'forbidden');
+}
+
+async function pushSubscribe(deps, auth, body) {
+  needLogin(auth);
+  if (!deps.push) fail('푸시 알림이 아직 설정되지 않았어요. README의 알림 설정을 확인해 주세요.');
+  const s = body.subscription || {};
+  const keys = s.keys || {};
+  if (!P.validEndpoint(s.endpoint) || typeof keys.p256dh !== 'string' || typeof keys.auth !== 'string' ||
+      keys.p256dh.length > 200 || keys.auth.length > 100) fail('알림 등록 정보가 올바르지 않아요. 다시 시도해 주세요.');
+  const id = P.subId(s.endpoint);
+  await deps.store.transact(tx => {
+    needSuper(tx.data, auth);
+    // 한 사람당 기기 10대까지 (오래된 것부터 정리)
+    const mine = Object.values(tx.data.push).filter(x => x.kakaoId === auth.kakaoId && x.id !== id)
+      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    mine.slice(0, Math.max(0, mine.length - 9)).forEach(x => tx.delPush(x.id));
+    tx.putPush({ id, kakaoId: auth.kakaoId, endpoint: s.endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth },
+      ua: L.plain(String(body.ua || '')).slice(0, 160), createdAt: nowIso() });
+  });
+  return view(deps, auth, { month: body.month });
+}
+
+async function pushUnsubscribe(deps, auth, body) {
+  needLogin(auth);
+  const id = typeof body.endpoint === 'string' ? P.subId(body.endpoint) : '';
+  await deps.store.transact(tx => {
+    const s = tx.data.push[id];
+    if (s && s.kakaoId === auth.kakaoId) tx.delPush(id);
+  });
+  return view(deps, auth, { month: body.month });
+}
+
+async function pushTest(deps, auth, body) {
+  const data = await deps.store.read();
+  needSuper(data, auth);
+  if (!deps.push) fail('푸시 알림이 아직 설정되지 않았어요.');
+  if (!Object.values(data.push).some(s => s.kakaoId === auth.kakaoId)) fail('이 계정으로 알림을 켠 기기가 없어요. 먼저 알림 받기를 눌러 주세요.');
+  const sent = await notify(deps, { title: '시험 알림', body: '알림이 잘 도착했어요. 봉사 일정 소식을 이렇게 알려 드릴게요.', url: '/?tab=settings', tag: 'test' }, { to: [auth.kakaoId] });
+  if (!sent) fail('알림을 보내지 못했어요. 알림을 껐다가 다시 켜 주세요.');
+  const v = await view(deps, auth, { month: body.month });
+  v.sent = sent;
+  return v;
+}
+
+// 매달 정해진 날: 다음 달 일정을 아직 저장하지 않은 봉사자를 알립니다.
+async function remindMissing(deps, now) {
+  const d = new Date((now || new Date()).getTime() + 9 * 3600 * 1000); // 서울 시간
+  const month = L.shiftMonth(d.toISOString().slice(0, 7), 1);
+  const data = await deps.store.read();
+  const missing = Object.values(data.vols)
+    .filter(v => (v.roles || []).length && !(v.dates || []).some(x => x.indexOf(month) === 0) && (v.savedMonths || []).indexOf(month) < 0)
+    .map(v => v.name).sort((a, b) => a.localeCompare(b, 'ko'));
+  if (!missing.length) return { month, missing, sent: 0 };
+  const list = missing.length > 12 ? missing.slice(0, 12).join(', ') + ` 외 ${missing.length - 12}명` : missing.join(', ');
+  const sent = await notifySafe(deps, { title: `${+month.slice(5)}월 일정 미입력 ${missing.length}명`, body: list, url: `/?tab=settings&month=${month}`, tag: 'remind-' + month });
+  return { month, missing, sent };
 }
 
 /* ---------- 구글 캘린더 ---------- */
@@ -483,4 +612,4 @@ async function syncCalendarSafe(deps, month, cat) {
   catch (e) { return `스케줄은 저장됐지만 구글 캘린더에 반영하지 못했어요: ${e.message}`; }
 }
 
-module.exports = { ctxOf, migrate, view, recordLogin, linkMine, saveMine, setup, adminAction, syncCalendar, ADMIN };
+module.exports = { ctxOf, migrate, view, recordLogin, linkMine, saveMine, setup, adminAction, syncCalendar, notify, pushSubscribe, pushUnsubscribe, pushTest, remindMissing, ADMIN };

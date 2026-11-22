@@ -34,6 +34,9 @@ const env = {
     store: new Store(new MemoryAdapter()), config, kakaoReady: true, setupCode: 'SETUP-123',
     calendar: { async upsert(id, ev) { const k = id || 'ev' + (++n); calendarEvents[k] = ev; return k; }, async remove(id) { delete calendarEvents[id]; } },
     calendarLinks: { google: 'https://calendar.google.com/', ical: 'https://example.com/basic.ics' },
+    // 미리보기용 푸시: 실제로 보내지 않고 터미널에 찍기만 합니다.
+    push: (() => { const c = require('crypto').createECDH('prime256v1'); c.generateKeys();
+      return { publicKey: c.getPublicKey('base64url'), recent: new Map(), async send(sub, payload) { console.log('[푸시]', payload); } }; })(),
   },
 };
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml' };

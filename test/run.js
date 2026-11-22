@@ -289,5 +289,78 @@ const L = require('../functions/src/logic');
     ok(r5.status === 400 && /CALENDAR_ID/.test(r5.json.error), 'resync without calendar explains');
   }
 
+  /* ---------- 관리자 푸시 알림 ---------- */
+  {
+    const S7 = makeServer({ kakaoUsers });
+    const su = await S7.login('c1'), su2 = await S7.login('c2'), team = await S7.login('c3'), vol = await S7.login('c4');
+    const SUB = n => ({ endpoint: 'https://fcm.googleapis.com/fcm/send/dev' + n, keys: { p256dh: 'P' + n, auth: 'A' + n } });
+    const post = (who, path, body) => S7.call('POST', path, { cookie: who.cookie, body: Object.assign({ month: M }, body) });
+    await post(su, '/api/setup', { code: 'SETUP-123' });
+    await post(su, '/api/admin/setAdmin', { kakaoId: '1002', admin: { all: true } });
+    await post(su, '/api/admin/setAdmin', { kakaoId: '1003', admin: { cats: ['찬양팀'] } });
+    let r = await post(team, '/api/push/subscribe', { subscription: SUB(9) });
+    ok(r.status === 403, 'team admin cannot subscribe');
+    r = await post(su, '/api/push/subscribe', { subscription: { endpoint: 'https://evil.example/x', keys: { p256dh: 'a', auth: 'b' } } });
+    ok(r.status === 400, 'unknown push host rejected');
+    r = await post(su, '/api/push/subscribe', { subscription: SUB(1), ua: 'iPhone' });
+    ok(r.status === 200 && r.json.push.devices === 1 && r.json.push.publicKey === 'TEST-PUBLIC-KEY', 'super admin subscribes');
+    await post(su, '/api/push/subscribe', { subscription: SUB(1) });
+    await post(su2, '/api/push/subscribe', { subscription: SUB(2) });
+    ok(Object.keys(S7.adapter.docs).filter(k => k.startsWith('push/')).length === 2, 'same device not duplicated');
+    ok((await S7.call('GET', '/api/view?month=' + M, { cookie: team.cookie })).json.push === undefined, 'team admin view has no push info');
+
+    r = await post(su, '/api/push/test', {});
+    ok(r.json.sent === 1 && S7.push.sent.length === 1 && S7.push.sent[0].endpoint.endsWith('dev1'), 'test push goes to own device only');
+    S7.push.sent.length = 0;
+
+    // 새 봉사자 가입 → 전체 관리자 둘 다
+    await post(vol, '/api/mine/save', { name: '새가족', roles: ['드럼'], dates: both(dec[0]), touched: [M] });
+    ok(S7.push.sent.length === 2 && S7.push.sent.every(x => x.title === '새 봉사자 가입' && /새가족님이 가입했어요 \(찬양팀\)\. 12월 가능 예배 2회/.test(x.body)), 'new volunteer notifies super admins');
+    S7.push.sent.length = 0;
+    // 같은 사람이 곧바로 다시 저장 → 첫 수정 알림 1번, 그다음은 10분 동안 묶음
+    await post(vol, '/api/mine/save', { name: '새가족', roles: ['드럼'], dates: both(dec[1]), touched: [M] });
+    await post(vol, '/api/mine/save', { name: '새가족', roles: ['드럼'], dates: both(dec[2]), touched: [M] });
+    ok(S7.push.sent.length === 2 && S7.push.sent[0].title === '봉사 일정 입력' && S7.push.sent[0].url === '/?tab=settings&month=' + M, 'date edits notify once, then throttled');
+    S7.push.sent.length = 0;
+    // 관리자 본인이 저장하면 본인에게는 안 감
+    await post(su, '/api/mine/save', { name: '관리자본인', roles: ['인도'], dates: both(dec[0]), touched: [M] });
+    ok(S7.push.sent.length === 1 && S7.push.sent[0].endpoint.endsWith('dev2'), 'actor is not notified');
+    S7.push.sent.length = 0;
+    // 팀 담당자 확정 → 전체 관리자 둘 다
+    await post(team, '/api/admin/setFinal', { cat: '찬양팀' });
+    ok(S7.push.sent.length === 2 && S7.push.sent[0].title === '스케줄 확정' && S7.push.sent[0].body.includes('12월 찬양팀') && S7.push.sent[0].url === '/?tab=schedule&month=' + M, 'finalize notifies super admins');
+    S7.push.sent.length = 0;
+    await post(su, '/api/admin/unsetFinal', { cat: '찬양팀' });
+    ok(S7.push.sent.length === 1 && S7.push.sent[0].title === '스케줄 확정 해제' && S7.push.sent[0].body.startsWith('관리자본인님'), 'unfinalize notifies other super admin');
+    S7.push.sent.length = 0;
+    // 알림을 끈 기기(410)는 자동 정리
+    S7.push.gone.add(SUB(2).endpoint);
+    await post(team, '/api/admin/setFinal', { cat: '찬양팀' });
+    ok(!S7.adapter.docs['push/' + require('../functions/src/push').subId(SUB(2).endpoint)], 'gone device removed');
+    // 끄기
+    r = await post(su, '/api/push/unsubscribe', { endpoint: SUB(1).endpoint });
+    ok(r.json.push.devices === 0, 'unsubscribe');
+    r = await post(su, '/api/push/test', {});
+    ok(r.status === 400, 'test without device explains');
+
+    // 미입력자 알림 (11월 20일 → 12월 확인)
+    await post(su, '/api/push/subscribe', { subscription: SUB(1) });
+    await post(su, '/api/admin/saveVolunteer', { name: '안넣음', roles: ['음향'] });
+    await post(su, '/api/admin/saveVolunteer', { name: '못감', roles: ['자막'] });
+    let v7 = (await S7.call('GET', '/api/view?month=' + M, { cookie: su.cookie })).json;
+    await post(su, '/api/admin/saveDates', { id: v7.vols.find(x => x.name === '못감').id, dates: [] }); // 0회로 저장 = 입력한 것
+    S7.push.sent.length = 0;
+    const rm = await require('../functions/src/service').remindMissing(S7.env.deps, new Date('2026-11-20T01:00:00Z'));
+    ok(rm.month === M && rm.missing.join() === '안넣음' && S7.push.sent.length === 1 && S7.push.sent[0].title === '12월 일정 미입력 1명', 'reminder lists only volunteers who never saved next month');
+  }
+  {
+    const S8 = makeServer({ kakaoUsers, noPush: true });
+    const X = await S8.login('c1');
+    await S8.call('POST', '/api/setup', { cookie: X.cookie, body: { month: M, code: 'SETUP-123' } });
+    const v8 = (await S8.call('GET', '/api/view?month=' + M, { cookie: X.cookie })).json;
+    const r8 = await S8.call('POST', '/api/push/subscribe', { cookie: X.cookie, body: { month: M, subscription: { endpoint: 'https://fcm.googleapis.com/x', keys: { p256dh: 'a', auth: 'b' } } } });
+    ok(v8.push === null && r8.status === 400, 'push off when not configured');
+  }
+
   summary();
 })().catch(e => { console.error(e); process.exitCode = 1; });

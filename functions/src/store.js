@@ -11,13 +11,14 @@
  *   months/{YYYY-MM}     { overrides, finals: { 팀: slots } }
  *   users/{카카오회원번호} { nickname, admin: { all, cats }, lastLogin }
  *   calendar/{YYYY-MM|팀} { map: { '날짜|시간대': 캘린더일정ID } }
+ *   push/{id}            { kakaoId, endpoint, keys, ua, createdAt }  관리자 푸시 알림을 받을 기기
  *   meta/state           { v }
  */
 'use strict';
 
-const COLS = { volunteers: 'vols', events: 'events', months: 'months', users: 'users', calendar: 'calendar' };
+const COLS = { volunteers: 'vols', events: 'events', months: 'months', users: 'users', calendar: 'calendar', push: 'push' };
 
-const emptyData = () => ({ roles: [], vols: {}, events: {}, months: {}, users: {}, calendar: {} });
+const emptyData = () => ({ roles: [], vols: {}, events: {}, months: {}, users: {}, calendar: {}, push: {} });
 const clone = o => JSON.parse(JSON.stringify(o));
 
 // 한 번의 변경 작업. data를 고치면서 바뀐 문서 경로를 기록합니다.
@@ -36,6 +37,8 @@ function makeTx(data) {
     putMonth: (m, val) => (val ? put('months', m, val) : del('months', m)),
     putUser: u => put('users', u.kakaoId, u),
     putCal: (key, val) => (val ? put('calendar', key, val) : del('calendar', key)),
+    putPush: s => put('push', s.id, s),
+    delPush: id => del('push', id),
     setRoles: roles => { d.roles = roles; dirty['config/main'] = { roles }; },
   };
 }
@@ -44,7 +47,7 @@ function makeTx(data) {
 function toDoc(path, val) {
   if (val === null) return null;
   const v = Object.assign({}, val);
-  if (path.startsWith('volunteers/') || path.startsWith('events/')) delete v.id;
+  if (path.startsWith('volunteers/') || path.startsWith('events/') || path.startsWith('push/')) delete v.id;
   if (path.startsWith('users/')) delete v.kakaoId;
   return v;
 }
@@ -59,6 +62,7 @@ function fromDocs(docs) {
     else if (col === 'months') data.months[id] = val;
     else if (col === 'users') data.users[id] = Object.assign({ kakaoId: id }, val);
     else if (col === 'calendar') data.calendar[id] = val;
+    else if (col === 'push') data.push[id] = Object.assign({ id }, val);
   });
   return data;
 }

@@ -236,7 +236,7 @@ const blankNew=()=>({name:"",roles:[],lockedCats:[],svcLock:{},prio:{}});
 const state={month:shiftMonth(monthKeyOf(new Date()),1),view:null,loading:true,error:"",loginMsg:"",formOwner:"",
   tab:"input",form:blankForm(),filter:"전체",editCell:null,volDraft:{},newVol:blankNew(),roleDraft:{},
   toast:"",toastErr:false,toastAt:"",busy:false,confirmDel:null,confirmReset:null,confirmUnlink:null,
-  linkPick:"",newReg:false,proxyId:"",evDraft:null,confirmEvDel:null,adminDraft:{},adminPick:"",volOpen:"",volQuery:"",volFilter:"all",newVolOpen:false};
+  linkPick:"",newReg:false,proxyId:"",evDraft:null,confirmEvDel:null,adminDraft:{},adminPick:"",volOpen:"",volQuery:"",volFilter:"all",newVolOpen:false,pushLocal:"",pushChecking:false};
 const V=()=>state.view;
 const isAdmin=()=>!!(V()&&V().admin);
 const myCats=()=>isAdmin()?V().admin.cats:[];
@@ -594,6 +594,54 @@ function usersAdminHtml(){
   </section>`;
 }
 
+/* ---------- 관리자 푸시 알림 (이 기기) ---------- */
+const pushSupported=()=>"serviceWorker" in navigator&&"PushManager" in window&&"Notification" in window;
+const isStandalone=()=>window.matchMedia("(display-mode: standalone)").matches||navigator.standalone===true;
+const isIOS=()=>/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+function b64ToU8(s){const b=atob((s+"=".repeat((4-s.length%4)%4)).replace(/-/g,"+").replace(/_/g,"/"));return Uint8Array.from(b,c=>c.charCodeAt(0))}
+async function checkPush(){
+  if(state.pushChecking)return;state.pushChecking=true;let st="unsupported";
+  try{if(pushSupported()){const reg=await navigator.serviceWorker.ready;const sub=await reg.pushManager.getSubscription();
+    st=sub?"on":Notification.permission==="denied"?"denied":"off"}}catch(e){st="unsupported"}
+  state.pushChecking=false;if(st!==state.pushLocal){state.pushLocal=st;if(state.tab==="settings")render()}
+}
+function pushAdminHtml(){
+  const P=V().push;
+  if(!state.pushLocal)setTimeout(checkPush,0);
+  let body;
+  if(!P)body=`<p>푸시 알림이 아직 설정되지 않았어요. 설치 안내서(README)의 ‘관리자 푸시 알림’ 순서대로 <b>VAPID_PRIVATE_KEY</b>를 등록하고 다시 배포하면 켤 수 있어요.</p>`;
+  else if(isIOS()&&!isStandalone())body=`<p>아이폰·아이패드는 <b>홈 화면에 추가한 앱</b>에서만 알림을 받을 수 있어요. 공유 버튼(□↑) → ‘홈 화면에 추가’를 한 뒤, 홈 화면 아이콘으로 앱을 열어 여기서 알림을 켜 주세요.</p>`;
+  else if(state.pushLocal==="unsupported")body=`<p>이 브라우저는 푸시 알림을 지원하지 않아요. 휴대폰의 Chrome·Safari(홈 화면 앱)에서 열어 주세요.</p>`;
+  else if(state.pushLocal==="denied")body=`<p>이 기기에서 알림이 차단돼 있어요. 휴대폰 설정(또는 브라우저 주소창의 자물쇠 → 권한)에서 이 앱의 알림을 허용한 뒤 다시 와 주세요.</p>`;
+  else if(state.pushLocal==="on")body=`<p><b>이 기기에서 알림을 받고 있어요.</b> 봉사자 가입·일정 입력, 다른 관리자의 확정, 매달 ${V().push.remindDay||20}일 미입력자 소식을 알려 드려요.</p>
+    <div class="row"><button class="btn ghost" id="pushTest">시험 알림 보내기</button><button class="btn ghost" id="pushOff">이 기기 알림 끄기</button></div>`;
+  else body=`<p>봉사자가 가입하거나 일정을 넣을 때, 다른 관리자가 스케줄을 확정할 때, 매달 미입력자가 있을 때 이 기기로 알림을 받아요.</p>
+    <div class="row"><button class="btn" id="pushOn" ${state.pushLocal?"":"disabled"}>이 기기에서 알림 받기</button></div>`;
+  return `<section class="panel" style="margin-top:20px">
+    <h2>푸시 알림</h2>${body}
+    ${P&&P.devices?`<p class="hint">알림을 켠 기기: ${P.devices}대 · 전체 관리자에게만 보내요.</p>`:`<p class="hint">전체 관리자에게만 보내요.</p>`}
+    <div class="row">${toastHtml("push")}</div>
+  </section>`;
+}
+async function pushOn(){
+  const M=state.month;
+  try{
+    const perm=await Notification.requestPermission();
+    if(perm!=="granted"){state.pushLocal=perm==="denied"?"denied":"off";render();return flash("알림 권한을 허용해야 받을 수 있어요.",true,"push")}
+    const reg=await navigator.serviceWorker.ready;
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64ToU8(V().push.publicKey)});
+    if(await run("push/subscribe",{month:M,subscription:sub.toJSON(),ua:navigator.userAgent},"이 기기에서 알림을 받아요. ‘시험 알림 보내기’로 확인해 보세요.","push")){state.pushLocal="on";render()}
+  }catch(e){flash("알림을 켜지 못했어요: "+(e.message||e),true,"push")}
+}
+async function pushOff(){
+  const M=state.month;
+  try{const reg=await navigator.serviceWorker.ready;const sub=await reg.pushManager.getSubscription();
+    const endpoint=sub?sub.endpoint:"";if(sub)await sub.unsubscribe();
+    state.pushLocal="off";await run("push/unsubscribe",{month:M,endpoint},"이 기기의 알림을 껐어요.","push")}
+  catch(e){flash("알림을 끄지 못했어요: "+(e.message||e),true,"push")}
+}
+
 // 관리 탭 봉사자 목록: 한 사람당 한 줄로 접어 두고, 누르면 펼쳐서 수정합니다.
 const volInCat=(v,c)=>v.roles.some(r=>roleCat(r)===c);
 const volFilterDefs=cats=>[["all","전체",()=>true],...cats.map(c=>[c,c,v=>volInCat(v,c)]),["none","역할 없음",v=>!cats.some(c=>volInCat(v,c))],["unlinked","카카오 미연결",v=>!v.linked]];
@@ -698,6 +746,7 @@ function renderSettings(){
   </div>
   ${eventsAdminHtml()}
   ${master?usersAdminHtml():""}
+  ${master?pushAdminHtml():""}
   <section class="panel" style="margin-top:20px">
     <h2>구글 캘린더 연동</h2>
     ${V().calendarReady
@@ -796,6 +845,9 @@ document.addEventListener("click",async e=>{
   if(t.dataset.final)return run("admin/setFinal",{month:M,cat:t.dataset.final},`${t.dataset.final} 스케줄을 확정하고 구글 캘린더에도 올렸어요.`);
   if(t.dataset.unfinal)return run("admin/unsetFinal",{month:M,cat:t.dataset.unfinal},`${t.dataset.unfinal} 확정을 해제하고 캘린더 일정도 지웠어요. 수동으로 정한 칸 외에는 다시 자동 배정됩니다.`);
   if(t.dataset.vrole){const dr=draftOf(t.dataset.vid);dr.roles=toggle(dr.roles,t.dataset.vrole);return render()}
+  if(t.id==="pushOn")return pushOn();
+  if(t.id==="pushOff")return pushOff();
+  if(t.id==="pushTest")return run("push/test",{month:M},"시험 알림을 보냈어요. 잠시 후 도착해요.","push");
   if(t.id==="nvToggle"){state.newVolOpen=!state.newVolOpen;return render()}
   if(t.dataset.vopen!==undefined){const id=t.dataset.vopen;state.volOpen=state.volOpen===id?"":id;state.confirmDel=state.confirmUnlink=null;return render()}
   if(t.dataset.vfilter){state.volFilter=t.dataset.vfilter;return render()}
@@ -893,8 +945,11 @@ async function copyText(){
   // 카카오 로그인에서 돌아온 경우 결과를 보여 주고 주소창을 정리합니다.
   const p=new URLSearchParams(location.search);
   if(p.get("login")==="ok")state.tab="input";
+  // 알림을 눌러 들어온 경우: ?tab=settings&month=2026-12
+  if(["input","schedule","settings"].includes(p.get("tab")))state.tab=p.get("tab");
+  if(/^\d{4}-\d{2}$/.test(p.get("month")||""))state.month=p.get("month");
   if(p.get("login_error"))state.loginMsg=p.get("login_error");
-  if(p.has("login")||p.has("login_error"))try{history.replaceState(null,"",location.pathname+location.hash)}catch(e){}
+  if(p.has("login")||p.has("login_error")||p.has("tab")||p.has("month"))try{history.replaceState(null,"",location.pathname+location.hash)}catch(e){}
 })();
 render();
 load(false);

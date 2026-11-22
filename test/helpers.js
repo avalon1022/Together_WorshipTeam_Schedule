@@ -31,16 +31,29 @@ function fakeCalendar() {
   };
 }
 
+// 가짜 푸시 발송기: 보낸 알림을 기록합니다. gone에 넣은 주소는 '알림 꺼짐(410)'으로 응답합니다.
+function fakePush() {
+  const sent = [], gone = new Set();
+  return {
+    publicKey: 'TEST-PUBLIC-KEY', sent, gone, recent: new Map(),
+    async send(sub, payload) {
+      if (gone.has(sub.endpoint)) { const e = new Error('gone'); e.statusCode = 410; throw e; }
+      sent.push({ endpoint: sub.endpoint, ...JSON.parse(payload) });
+    },
+  };
+}
+
 function makeServer(opts) {
   opts = opts || {};
   const adapter = new MemoryAdapter();
   const store = new Store(adapter);
   const calendar = opts.noCalendar ? null : fakeCalendar();
+  const push = opts.noPush ? null : fakePush();
   const env = {
     sessionSecret: 'test-secret', sessionDays: 60, publicUrl: opts.publicUrl || 'https://test.example',
     fetch: fakeKakao(opts.kakaoUsers || {}),
     kakao: { restKey: 'RESTKEY', clientSecret: 'CS' },
-    deps: { store, config, kakaoReady: true, setupCode: 'SETUP-123', calendar,
+    deps: { store, config, kakaoReady: true, setupCode: 'SETUP-123', calendar, push,
       calendarLinks: calendar ? { google: 'https://calendar.google.com/x', ical: 'https://x/ical' } : null },
   };
   async function call(method, path, { body, cookie, headers } = {}) {
@@ -62,7 +75,7 @@ function makeServer(opts) {
     const sc = cb.headers['set-cookie'] || '';
     return { cookie: sc.split(';')[0], location: cb.headers.location };
   }
-  return { env, store, adapter, calendar, call, login };
+  return { env, store, adapter, calendar, push, call, login };
 }
 
 let failed = 0, passed = 0;

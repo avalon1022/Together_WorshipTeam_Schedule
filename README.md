@@ -165,6 +165,27 @@ JSON 키 파일은 프로젝트를 배포할 수 있는 열쇠입니다. GitHub�
 
 자동 배포를 쓰면 GitHub의 Variables가 기준이 됩니다. 값을 바꿀 때는 Variables를 고친 뒤 Actions 탭에서 **Run workflow**를 누르세요. (`firebase functions:secrets:set`으로 넣은 비밀 값 세 개는 Firebase에 그대로 있으므로 GitHub에 넣지 않습니다.)
 
+### 11. 홈 화면 앱과 관리자 푸시 알림
+**홈 화면 앱(PWA)** 은 따로 설정할 것이 없습니다. 휴대폰으로 사이트를 열면 위쪽에 설치 안내가 나옵니다.
+- 아이폰: Safari → 공유 버튼(□↑) → **홈 화면에 추가**
+- 안드로이드: Chrome에서 **설치** 버튼 (또는 메뉴 → 홈 화면에 추가)
+- 카카오톡 안에서 링크를 열었다면 먼저 ‘다른 브라우저로 열기’를 하세요.
+
+**관리자 푸시 알림** 은 전체 관리자에게만 갑니다: 새 봉사자 가입·연결, 봉사자 일정 저장(같은 사람은 10분에 한 번), 다른 관리자의 확정·해제, 매달 20일 오전 10시 다음 달 미입력자(`functions/config.js`의 `REMIND`).
+
+처음 한 번만 설정합니다.
+1. 알림용 개인 키를 만들어 비밀 값으로 등록합니다. (첫 줄이 출력한 값을 둘째 줄에 붙여넣기)
+   ```bash
+   node -e "const c=require('crypto').createECDH('prime256v1');c.generateKeys();console.log(c.getPrivateKey('base64url'))"
+   firebase functions:secrets:set VAPID_PRIVATE_KEY
+   ```
+   이 키를 바꾸면 모든 기기에서 알림을 다시 켜야 합니다.
+2. [Google Cloud 콘솔](https://console.cloud.google.com) → **API 및 서비스 → 라이브러리** → **Cloud Scheduler API** 사용 (미입력자 알림용)
+3. **IAM 및 관리자 → IAM** → `github-deploy` 계정 연필 아이콘 → 역할 **Cloud Scheduler 관리자 (Cloud Scheduler Admin)** 추가
+4. 다시 배포한 뒤, 전체 관리자가 휴대폰에서 **관리 탭 → 푸시 알림 → 이 기기에서 알림 받기** → **시험 알림 보내기**
+
+아이폰은 iOS 16.4 이상에서, **홈 화면에 추가한 앱으로 열었을 때만** 알림을 켤 수 있습니다.
+
 ---
 
 ## 바꾸고 싶을 때

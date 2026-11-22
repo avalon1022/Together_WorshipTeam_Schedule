@@ -7,6 +7,7 @@
  *   POST /api/logout
  *   POST /api/mine/save | /api/mine/link
  *   POST /api/setup                   첫 전체 관리자 설정
+ *   POST /api/push/subscribe | unsubscribe | test   관리자 푸시 알림
  *   POST /api/admin/<작업>
  *
  * env = { deps, sessionSecret, kakao: { restKey, clientSecret }, fetch, publicUrl, sessionDays }
@@ -89,6 +90,9 @@ async function handle(env, req, res) {
     if (path === '/api/mine/save') return send(res, 200, await S.saveMine(deps, auth, body));
     if (path === '/api/mine/link') return send(res, 200, await S.linkMine(deps, auth, body));
     if (path === '/api/setup') return send(res, 200, await S.setup(deps, auth, body));
+    if (path === '/api/push/subscribe') return send(res, 200, await S.pushSubscribe(deps, auth, body));
+    if (path === '/api/push/unsubscribe') return send(res, 200, await S.pushUnsubscribe(deps, auth, body));
+    if (path === '/api/push/test') return send(res, 200, await S.pushTest(deps, auth, body));
     const m = path.match(/^\/api\/admin\/([A-Za-z]+)$/);
     if (m) return send(res, 200, await S.adminAction(deps, auth, m[1], body));
     return send(res, 404, { error: '없는 주소예요.' });
