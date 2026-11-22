@@ -98,6 +98,16 @@ textarea{width:100%;font:inherit;margin-top:10px}
 .warn{color:var(--warn);font-size:13px;margin:0 0 12px}
 .vol{flex-direction:column;align-items:stretch}
 .vhead{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;align-items:baseline}
+.vtools{display:flex;flex-direction:column;gap:10px;margin:4px 0 12px}
+.vrow{display:flex;align-items:center;gap:10px;width:100%;background:none;border:0;padding:2px 0;margin:0;text-align:left;cursor:pointer;color:inherit;font:inherit}
+.vrow .caret{flex:none;color:var(--muted);font-size:12px;transition:transform .15s}
+.vrow[aria-expanded=true] .caret{transform:rotate(90deg)}
+.vrow b{flex:none}
+.vrow .vsum{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--muted)}
+.vrow .vcount{flex:none;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.badge{flex:none;font-size:11px;font-weight:600;border:1px solid var(--line);border-radius:999px;padding:1px 7px;color:var(--muted)}
+.vol.open{border-color:var(--muted)}
+.vol .vbody{display:flex;flex-direction:column;gap:8px;margin-top:6px}
 .check{display:inline-flex;gap:6px;align-items:center;font-size:14px;cursor:pointer}
 .check input{width:16px;height:16px;accent-color:var(--accent)}
 .lockmark{font-size:12px;font-weight:600;color:var(--accent);background:var(--accent-soft);border-radius:4px;padding:1px 6px;margin-left:6px}
@@ -210,7 +220,7 @@ const blankNew=()=>({name:"",roles:[],lockedCats:[],svcLock:{},prio:{}});
 const state={month:shiftMonth(monthKeyOf(new Date()),1),view:null,loading:true,error:"",loginMsg:"",formOwner:"",
   tab:"input",form:blankForm(),filter:"전체",editCell:null,volDraft:{},newVol:blankNew(),roleDraft:{},
   toast:"",toastErr:false,toastAt:"",busy:false,confirmDel:null,confirmReset:null,confirmUnlink:null,
-  linkPick:"",newReg:false,proxyId:"",evDraft:null,confirmEvDel:null,adminDraft:{},adminPick:""};
+  linkPick:"",newReg:false,proxyId:"",evDraft:null,confirmEvDel:null,adminDraft:{},adminPick:"",volOpen:"",volQuery:"",volFilter:"all",newVolOpen:false};
 const V=()=>state.view;
 const isAdmin=()=>!!(V()&&V().admin);
 const myCats=()=>isAdmin()?V().admin.cats:[];
@@ -568,6 +578,47 @@ function usersAdminHtml(){
   </section>`;
 }
 
+// 관리 탭 봉사자 목록: 한 사람당 한 줄로 접어 두고, 누르면 펼쳐서 수정합니다.
+const volInCat=(v,c)=>v.roles.some(r=>roleCat(r)===c);
+const volFilterDefs=cats=>[["all","전체",()=>true],...cats.map(c=>[c,c,v=>volInCat(v,c)]),["none","역할 없음",v=>!cats.some(c=>volInCat(v,c))],["unlinked","카카오 미연결",v=>!v.linked]];
+function volFilterChips(vols,cats){
+  return volFilterDefs(cats).map(([k,l,f])=>{const n=vols.filter(f).length;
+    return (k==="none"||k==="unlinked")&&!n&&state.volFilter!==k?"":`<button class="chip" data-vfilter="${esc(k)}" aria-pressed="${state.volFilter===k}">${esc(l)} ${n}</button>`}).join("");
+}
+function volVisible(vols,cats){
+  const def=volFilterDefs(cats).find(d=>d[0]===state.volFilter)||volFilterDefs(cats)[0];
+  const q=state.volQuery.trim().toLowerCase();
+  return vols.filter(v=>def[2](v)&&(!q||v.name.toLowerCase().includes(q)));
+}
+function volListHtml(vols,cats,draft,catControls,master){
+  if(!vols.length)return `<p class="hint">아직 봉사자가 없어요. ‘+ 봉사자 등록’으로 미리 등록하거나, 봉사자가 카카오로 로그인해 이름을 입력하면 여기에 나타나요.</p>`;
+  const list=volVisible(vols,cats);
+  if(!list.length)return `<p class="hint">조건에 맞는 봉사자가 없어요.</p>`;
+  return list.map(v=>{const dr=draft(v),open=state.volOpen===v.id;
+    const mine=v.roles.filter(r=>cats.includes(roleCat(r)));
+    const others=v.roles.filter(r=>!cats.includes(roleCat(r)));
+    const changed=JSON.stringify([[...dr.roles].sort(),[...dr.lockedCats].sort(),dr.svcLock,dr.prio||{}])!==JSON.stringify([[...v.roles].sort(),[...v.lockedCats].sort(),v.svcLock,v.prio||{}]);
+    const prio=cats.filter(usesPrio).map(c=>(v.prio||{})[c]).filter(Boolean).map(p=>p==="high"?"자주":"가끔");
+    return `<div class="item vol${open?" open":""}">
+      <button class="vrow" data-vopen="${esc(v.id)}" aria-expanded="${open}">
+        <span class="caret" aria-hidden="true">▶</span><b>${esc(v.name)}</b>
+        <span class="vsum">${esc(mine.join("·")||"역할 없음")}</span>
+        ${changed?`<span class="badge">수정 중</span>`:""}${prio.map(p=>`<span class="badge">${p}</span>`).join("")}${v.linked?"":`<span class="badge">미연결</span>`}
+        <span class="vcount">가능 ${v.stats.avail}주</span>
+      </button>
+      ${open?`<div class="vbody">
+        <span class="meta">${esc(mLabel(state.month))} 가능 ${v.stats.avail}주 · ${v.linked?"카카오 연결됨":"카카오 미연결"}</span>
+        ${others.length?`<span class="meta">다른 팀 역할: ${esc(others.join(", "))}</span>`:""}
+        ${cats.map(c=>catControls(dr,v.id,c)).join("")}
+        <div class="row" style="justify-content:flex-end">
+          <button class="btn ghost" data-vsave="${esc(v.id)}">저장</button>
+          <button class="btn ghost" data-vproxy="${esc(v.id)}">일정 대신 입력</button>
+          ${v.linked?`<button class="btn ghost" data-vunlink="${esc(v.id)}">${state.confirmUnlink===v.id?"한 번 더 누르면 해제":"카카오 연결 해제"}</button>`:""}
+          ${master?`<button class="btn danger" data-vdel="${esc(v.id)}">${state.confirmDel===v.id?"한 번 더 누르면 삭제":"삭제"}</button>`:""}
+        </div></div>`:""}
+    </div>`}).join("");
+}
+
 function renderSettings(){
   if(!isAdmin()){
     const me=V().me;
@@ -612,26 +663,20 @@ function renderSettings(){
       <p class="hint">숫자는 1부·2부 각각 필요한 인원입니다. 역할 이름은 팀끼리 겹치지 않게 지어 주세요.</p>
     </section>
     <section class="panel">
-      <h2>봉사자 ${V().vols.length}명</h2>
-      <div class="newvol">
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">봉사자 ${V().vols.length}명</h2>
+        <button class="btn ${state.newVolOpen?"ghost":""} small" id="nvToggle">${state.newVolOpen?"등록 닫기":"+ 봉사자 등록"}</button></div>
+      ${state.newVolOpen?`<div class="newvol" style="margin-top:12px">
         <span class="label">봉사자 미리 등록</span>
         <input type="text" id="nvName" maxlength="20" placeholder="이름" value="${esc(nv.name)}">
         ${cats.map(c=>catControls(nv,"new",c)).join("")}
         <div class="row"><button class="btn" id="nvSave">등록</button></div>
-      </div>
-      <div class="list">${vols.length?vols.map(v=>{const dr=draft(v);
-        const others=v.roles.filter(r=>!cats.includes(roleCat(r)));
-        return `<div class="item vol">
-        <div class="vhead"><b>${esc(v.name)}</b>
-          <span class="meta">${esc(mLabel(state.month))} 가능 ${v.stats.avail}주 · ${v.linked?"카카오 연결됨":"카카오 미연결"}</span></div>
-        ${others.length?`<span class="meta">다른 팀 역할: ${esc(others.join(", "))}</span>`:""}
-        ${cats.map(c=>catControls(dr,v.id,c)).join("")}
-        <div class="row" style="justify-content:flex-end">
-          <button class="btn ghost" data-vsave="${esc(v.id)}">저장</button>
-          <button class="btn ghost" data-vproxy="${esc(v.id)}">일정 대신 입력</button>
-          ${v.linked?`<button class="btn ghost" data-vunlink="${esc(v.id)}">${state.confirmUnlink===v.id?"한 번 더 누르면 해제":"카카오 연결 해제"}</button>`:""}
-          ${master?`<button class="btn danger" data-vdel="${esc(v.id)}">${state.confirmDel===v.id?"한 번 더 누르면 삭제":"삭제"}</button>`:""}
-        </div></div>`}).join(""):`<p class="hint">아직 봉사자가 없어요.</p>`}</div>
+      </div>`:""}
+      <div class="row" style="margin-top:8px">${toastHtml("vol")}</div>
+      ${V().vols.length?`<div class="vtools">
+        <input type="text" id="volQuery" placeholder="이름 검색" value="${esc(state.volQuery)}" autocomplete="off" aria-label="봉사자 이름 검색">
+        <div class="chips sm" id="volFilters">${volFilterChips(vols,cats)}</div>
+      </div>`:""}
+      <div class="list" id="volList">${volListHtml(vols,cats,draft,catControls,master)}</div>
       <p class="hint" style="margin-top:12px">‘역할 고정’을 켜면 봉사자 본인은 그 팀의 역할을 바꿀 수 없어요. ‘부 고정’을 정하면 그 팀 역할은 고정한 부에만 배정됩니다. ${master?"":"팀에서 빼려면 역할을 모두 해제하고 저장하세요."}</p>
     </section>
   </div>
@@ -735,17 +780,20 @@ document.addEventListener("click",async e=>{
   if(t.dataset.final)return run("admin/setFinal",{month:M,cat:t.dataset.final},`${t.dataset.final} 스케줄을 확정하고 구글 캘린더에도 올렸어요.`);
   if(t.dataset.unfinal)return run("admin/unsetFinal",{month:M,cat:t.dataset.unfinal},`${t.dataset.unfinal} 확정을 해제하고 캘린더 일정도 지웠어요. 수동으로 정한 칸 외에는 다시 자동 배정됩니다.`);
   if(t.dataset.vrole){const dr=draftOf(t.dataset.vid);dr.roles=toggle(dr.roles,t.dataset.vrole);return render()}
+  if(t.id==="nvToggle"){state.newVolOpen=!state.newVolOpen;return render()}
+  if(t.dataset.vopen!==undefined){const id=t.dataset.vopen;state.volOpen=state.volOpen===id?"":id;state.confirmDel=state.confirmUnlink=null;return render()}
+  if(t.dataset.vfilter){state.volFilter=t.dataset.vfilter;return render()}
   if(t.id==="nvSave"){const nv=state.newVol,name=nv.name.trim();
-    if(!name)return flash("이름을 입력해 주세요.",true);
-    if(!nv.roles.length)return flash("역할을 하나 이상 골라 주세요.",true);
-    if(await run("admin/saveVolunteer",{month:M,name,roles:nv.roles,lockedCats:nv.lockedCats,svcLock:nv.svcLock,prio:nv.prio},`${name}님을 등록했어요.`)){state.newVol=blankNew();render()}return}
+    if(!name)return flash("이름을 입력해 주세요.",true,"vol");
+    if(!nv.roles.length)return flash("역할을 하나 이상 골라 주세요.",true,"vol");
+    if(await run("admin/saveVolunteer",{month:M,name,roles:nv.roles,lockedCats:nv.lockedCats,svcLock:nv.svcLock,prio:nv.prio},`${name}님을 등록했어요.`,"vol")){state.newVol=blankNew();state.newVolOpen=false;render()}return}
   if(t.dataset.vsave){const v=vol(t.dataset.vsave),dr=state.volDraft[v.id];
-    return run("admin/saveVolunteer",{month:M,id:v.id,name:v.name,roles:dr.roles,lockedCats:dr.lockedCats,svcLock:dr.svcLock,prio:dr.prio},`${v.name}님 정보를 저장했어요.`)}
+    return run("admin/saveVolunteer",{month:M,id:v.id,name:v.name,roles:dr.roles,lockedCats:dr.lockedCats,svcLock:dr.svcLock,prio:dr.prio},`${v.name}님 정보를 저장했어요.`,"vol")}
   if(t.dataset.vunlink){const id=t.dataset.vunlink;if(state.confirmUnlink!==id){state.confirmUnlink=id;state.confirmDel=state.confirmReset=null;return render()}
-    state.confirmUnlink=null;return run("admin/unlinkKakao",{month:M,id},"카카오 연결을 해제했어요. 본인이 다시 로그인해서 이름을 연결하면 됩니다.")}
+    state.confirmUnlink=null;return run("admin/unlinkKakao",{month:M,id},"카카오 연결을 해제했어요. 본인이 다시 로그인해서 이름을 연결하면 됩니다.","vol")}
   if(t.dataset.vproxy){state.proxyId=t.dataset.vproxy;loadProxyForm();state.tab="input";state.toast="";return render()}
   if(t.dataset.vdel){const id=t.dataset.vdel;if(state.confirmDel!==id){state.confirmDel=id;state.confirmReset=state.confirmUnlink=null;return render()}
-    state.confirmDel=null;if(state.proxyId===id)state.proxyId="";return run("admin/deleteVolunteer",{month:M,id},"삭제했어요.")}
+    state.confirmDel=null;if(state.proxyId===id)state.proxyId="";return run("admin/deleteVolunteer",{month:M,id},"삭제했어요.","vol")}
   if(t.id==="evNew"){state.evDraft=blankEvent();return render()}
   if(t.id==="evCancel"){state.evDraft=null;return render()}
   if(t.dataset.evedit){const e=(V().allEvents||[]).find(x=>x.id===t.dataset.evedit);if(!e)return;
@@ -794,6 +842,7 @@ document.addEventListener("input",e=>{
   const t=e.target;
   if(t.id==="nm")state.form.name=t.value;
   if(t.id==="nvName")state.newVol.name=t.value;
+  if(t.id==="volQuery"){state.volQuery=t.value;render();const q=$("#volQuery");if(q){q.focus();q.setSelectionRange(q.value.length,q.value.length)}}
   if(t.id==="evName")state.evDraft.name=t.value;
   if(t.id==="evDate")state.evDraft.date=t.value;
   if(t.dataset.evs!==undefined){state.evDraft.slots[+t.dataset.evs][t.dataset.k]=t.value}
