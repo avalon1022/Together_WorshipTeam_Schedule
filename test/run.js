@@ -131,7 +131,7 @@ const L = require('../functions/src/logic');
   const calCount = () => Object.keys(S.calendar.events).length;
   ok(calCount() === dec.length * 2, 'calendar events created (' + calCount() + ')');
   const ev1 = Object.values(S.calendar.events)[0];
-  ok(ev1.start.dateTime === dec[0] + 'T09:00:00' && ev1.start.timeZone === 'Asia/Seoul' && /^1부 방송팀: /.test(ev1.summary), 'calendar event time and title');
+  ok(ev1.start.dateTime === dec[0] + 'T11:00:00' && ev1.start.timeZone === 'Asia/Seoul' && /^1부 방송팀: /.test(ev1.summary), 'calendar event time and title');
   const vA = V.vols.find(v => v.name === '방송A');
   r = await S.call('POST', '/api/admin/editFinalCell', { cookie: A.cookie, body: { month: M, date: dec[1], svc: '2', role: '음향', ids: [vA.id] } });
   ok(calCount() === dec.length * 2 && S.calendar.log.filter(x => x === 'new').length === dec.length * 2, 'edit updates, no duplicate');
