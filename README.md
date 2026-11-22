@@ -134,6 +134,37 @@ Firebase 콘솔 **Hosting → 커스텀 도메인 추가**에서 도메인을 �
 - 카카오 리다이렉트 URI에 `https://새도메인/auth/kakao/callback`을 추가합니다.
 - `firebase deploy --only functions`로 다시 배포합니다.
 
+### 10. 자동 배포 (GitHub Actions)
+설정해 두면 `main` 브랜치에 코드가 올라올 때마다 시험을 돌리고, 통과하면 자동으로 배포합니다. (`.github/workflows/deploy.yml`)
+
+**① 배포용 서비스 계정 만들기** — [Google Cloud 콘솔](https://console.cloud.google.com)에서 내 프로젝트 선택
+1. **IAM 및 관리자 → 서비스 계정 → 서비스 계정 만들기**, 이름 `github-deploy`
+2. **역할**에 아래 7개를 추가 (역할 검색창에 이름 입력)
+   - Firebase 관리자 (Firebase Admin)
+   - Cloud Functions 관리자 (Cloud Functions Admin)
+   - Cloud Run 관리자 (Cloud Run Admin)
+   - 서비스 계정 사용자 (Service Account User)
+   - Secret Manager 관리자 (Secret Manager Admin)
+   - Artifact Registry 관리자 (Artifact Registry Administrator)
+   - 서비스 사용량 소비자 (Service Usage Consumer)
+3. 만든 계정 클릭 → **키 → 키 추가 → 새 키 만들기 → JSON** → 파일이 내려받아집니다.
+
+**② GitHub 저장소에 등록** — 저장소 **Settings → Secrets and variables → Actions**
+- **Secrets** 탭 → New repository secret
+  - `FIREBASE_SERVICE_ACCOUNT`: 내려받은 JSON 파일 내용 전체 (메모장으로 열어 통째로 복사)
+  - `CALENDAR_ICAL_URL`: (선택) 캘린더 비공개 iCal 주소
+- **Variables** 탭 → New repository variable
+  - `FIREBASE_PROJECT_ID`: 프로젝트 ID
+  - `KAKAO_REST_API_KEY`: 카카오 REST API 키
+  - `PUBLIC_URL`: 앱 주소 (예: `https://프로젝트ID.web.app`)
+  - `CALENDAR_ID`: (선택) 캘린더 ID
+
+JSON 키 파일은 프로젝트를 배포할 수 있는 열쇠입니다. GitHub에 넣은 뒤 컴퓨터에서 지우고, 절대 저장소에 커밋하지 마세요.
+
+**③ 확인** — 저장소 **Actions 탭 → 배포 → Run workflow**. 초록 체크가 뜨면 성공입니다.
+
+자동 배포를 쓰면 GitHub의 Variables가 기준이 됩니다. 값을 바꿀 때는 Variables를 고친 뒤 Actions 탭에서 **Run workflow**를 누르세요. (`firebase functions:secrets:set`으로 넣은 비밀 값 세 개는 Firebase에 그대로 있으므로 GitHub에 넣지 않습니다.)
+
 ---
 
 ## 바꾸고 싶을 때
@@ -145,7 +176,7 @@ Firebase 콘솔 **Hosting → 커스텀 도메인 추가**에서 도메인을 �
 | 역할과 필요 인원 | 앱의 **관리 탭** (배포 필요 없음) |
 | 화면 | `public/index.html` |
 
-코드를 바꾼 뒤에는 `firebase deploy`로 다시 배포합니다. 화면만 바꿨다면 `firebase deploy --only hosting`으로 충분합니다.
+코드를 바꾼 뒤에는 `firebase deploy`로 다시 배포합니다. 화면만 바꿨다면 `firebase deploy --only hosting`으로 충분합니다. 10단계 자동 배포를 설정했다면 `main`에 올리기만 하면 됩니다.
 
 ## 로컬 미리보기와 시험
 설치 없이 내 컴퓨터에서 화면을 확인할 수 있습니다. 데이터는 메모리에만 저장되고, 카카오 로그인은 가짜 화면으로 대신합니다.
