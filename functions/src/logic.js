@@ -64,14 +64,21 @@ function cleanSlots(list) {
 function cleanIds(ids) { return uniq((Array.isArray(ids) ? ids : []).map(String).filter(x => /^[A-Za-z0-9_-]{1,40}$/.test(x))); }
 
 /* ---------- 예배·이벤트 시간대 ---------- */
+// 그 주일에 열리는 부: 특별 일정으로 대체됐으면 없음, '1부만'·'2부만'이면 하나
+const SUN_MODES = { only1: ['1'], only2: ['2'] };
+function sunServices(ctx, d) {
+  if ((ctx.events || []).some(e => e.replaces && e.date === d)) return [];
+  return SUN_MODES[(ctx.sunMode || {})[d]] || SERVICES;
+}
+// occasions의 counts: 봉사 횟수에 넣는 시간대 (주일 예배, 주일을 대체한 특별 일정)
 function occasions(ctx, month) {
   const out = [];
-  sundays(month).forEach(d => SERVICES.forEach(s => out.push({
-    d, s, group: 'sun', sunday: true, roles: ctx.roles, label: s + '부', evName: '',
+  sundays(month).forEach(d => sunServices(ctx, d).forEach(s => out.push({
+    d, s, group: 'sun', sunday: true, counts: true, roles: ctx.roles, label: s + '부', evName: '',
     start: ((ctx.serviceTimes || {})[s] || [])[0] || '09:00', end: ((ctx.serviceTimes || {})[s] || [])[1] || '',
   })));
   (ctx.events || []).filter(e => e.date.indexOf(month) === 0).forEach(e => e.slots.forEach(sl => out.push({
-    d: e.date, s: 'e' + e.id + '_' + sl.k, group: 'e' + e.id, sunday: false, eventId: e.id, evName: e.name,
+    d: e.date, s: 'e' + e.id + '_' + sl.k, group: 'e' + e.id, sunday: false, counts: !!e.replaces, eventId: e.id, evName: e.name,
     roles: ctx.roles.filter(r => e.teams.indexOf(r.cat) >= 0), label: sl.label || '', start: sl.start || '', end: sl.end || '',
   })));
   out.sort((a, b) => a.d.localeCompare(b.d) || (a.sunday === b.sunday ? 0 : a.sunday ? -1 : 1));
@@ -93,13 +100,15 @@ function occOf(ctx, month, date, svc) {
  *  · 한 시간대에서 한 사람은 한 역할만
  *  · 같은 예배·이벤트의 여러 시간대는 두 배정 모두 bothServices 팀일 때만
  *  · '부 고정'은 주일에만 적용
- *  · 이벤트 봉사는 횟수에 넣지 않음
+ *  · 이벤트 봉사는 횟수에 넣지 않음 (단, 주일을 대체한 특별 일정은 주일처럼 셈)
  * 확정된 팀의 배정과 수동으로 정한 칸은 고정한 채로 나머지를 채웁니다.
  */
-function countServed(slots, roleCat, cats) {
+// counted: 횟수에 넣을 'd|s' 집합 (없으면 주일 1·2부만)
+function countedKeys(ctx, month) { return new Set(occasions(ctx, month).filter(o => o.counts).map(o => o.d + '|' + o.s)); }
+function countServed(slots, roleCat, cats, counted) {
   const days = {}, perRole = {};
   eachCell(slots, (d, s, r, ps) => {
-    if (SERVICES.indexOf(s) < 0) return;
+    if (counted ? !counted.has(d + '|' + s) : SERVICES.indexOf(s) < 0) return;
     if (cats && cats.indexOf(roleCat[r]) < 0) return;
     ps.forEach(p => { (days[p.id] = days[p.id] || {})[d] = 1; perRole[p.id + '|' + r] = (perRole[p.id + '|' + r] || 0) + 1; });
   });
@@ -114,12 +123,13 @@ function history(ctx, key, depth, roleCat, memo) {
   [[1, 4], [2, 2]].forEach(([n, w]) => {
     const k = shiftMonth(key, -n);
     const s = buildSchedule(ctx, k, depth - 1, memo);
-    const c = countServed(s, roleCat);
+    const counted = countedKeys(ctx, k);
+    const c = countServed(s, roleCat, null, counted);
     Object.keys(c.n).forEach(id => { h[id] = (h[id] || 0) + c.n[id] * w; });
     Object.keys(c.perRole).forEach(x => { hr[x] = (hr[x] || 0) + c.perRole[x]; });
     if (n === 1) {
-      const last = sundays(k).slice(-1)[0];
-      eachCell({ [last]: s[last] || {} }, (d, sv, r, ps) => { if (SERVICES.indexOf(sv) >= 0) ps.forEach(p => prev.add(p.id)); });
+      const last = Array.from(counted).map(x => x.slice(0, 10)).sort().slice(-1)[0];
+      if (last) eachCell({ [last]: s[last] || {} }, (d, sv, r, ps) => { if (counted.has(d + '|' + sv)) ps.forEach(p => prev.add(p.id)); });
     }
   });
   return { h, hr, prev };
@@ -169,7 +179,7 @@ function buildSchedule(ctx, key, depth, memo) {
       used[o.s].add(id);
       (on[id] = on[id] || {})[o.s] = { cat: roleCat[r], group: o.group };
       (inGroup[o.group] = inGroup[o.group] || new Set()).add(id);
-      if (o.sunday) {
+      if (o.counts) {
         if (!servedToday.has(id)) { servedToday.add(id); total[id] = (total[id] || 0) + 1; }
         perRole[id + '|' + r] = (perRole[id + '|' + r] || 0) + 1;
       }
@@ -221,14 +231,14 @@ function buildSchedule(ctx, key, depth, memo) {
       }
       slots[d][o.s][t.r.name] = pick;
     });
-    if (dayOcc.some(o => o.sunday)) prev = servedToday;
+    if (dayOcc.some(o => o.counts)) prev = servedToday;
   });
   memo[mk] = slots;
   return slots;
 }
 
 /* ---------- 화면 데이터 ---------- */
-const eventView = e => ({ id: e.id, name: e.name, date: e.date, teams: e.teams, slots: e.slots });
+const eventView = e => ({ id: e.id, name: e.name, date: e.date, teams: e.teams, slots: e.slots, replaces: !!e.replaces });
 const publicVol = v => ({ id: v.id, name: v.name, roles: v.roles, lockedCats: v.lockedCats, svcLock: v.svcLock, linked: !!v.kakaoId });
 const mineView = v => (v ? Object.assign(publicVol(v), { dates: v.dates }) : null);
 
@@ -247,6 +257,12 @@ function publicView(ctx, month, memo) {
     schedule: { slots: buildSchedule(ctx, month, 2, memo), finalCats: catNames(ctx).filter(c => ctx.confirmed[month + '|' + c]) },
     dayCounts,
     events: (ctx.events || []).filter(e => e.date.indexOf(month) === 0).map(eventView),
+    // 평소와 다른 주일: { 날짜: 'only1' | 'only2' | 'replaced' }
+    sunMode: sundays(month).reduce((m, d) => {
+      const svcs = sunServices(ctx, d);
+      if (!svcs.length) m[d] = 'replaced'; else if (svcs.length === 1) m[d] = 'only' + svcs[0];
+      return m;
+    }, {}),
   };
 }
 
@@ -263,10 +279,11 @@ function adminExtras(ctx, month, admin, view, memo) {
   const cats = editableCats(ctx, admin);
   const roleCat = {};
   ctx.roles.forEach(r => { roleCat[r.name] = r.cat; });
-  const now = countServed(view.schedule.slots, roleCat, cats).n;
+  const now = countServed(view.schedule.slots, roleCat, cats, countedKeys(ctx, month)).n;
   const recent = {};
   [1, 2].forEach(n => {
-    const c = countServed(buildSchedule(ctx, shiftMonth(month, -n), 1, memo), roleCat, cats).n;
+    const pm = shiftMonth(month, -n);
+    const c = countServed(buildSchedule(ctx, pm, 1, memo), roleCat, cats, countedKeys(ctx, pm)).n;
     Object.keys(c).forEach(id => { recent[id] = (recent[id] || 0) + c[id]; });
   });
   view.admin = { all: !!admin.all, cats };
@@ -291,6 +308,6 @@ function adminExtras(ctx, month, admin, view, memo) {
 module.exports = {
   SERVICES, PRIORITIES, PRIO_WEIGHT, usesPrio, UserError, fail, uniq, shiftMonth, sundays, eachCell, catNames, bothOk,
   checkMonth, checkCat, plain, cleanName, cleanSlots, cleanIds,
-  occasions, occOf, buildSchedule, countServed, publicView, adminExtras, editableCats, needCat,
+  occasions, occOf, sunServices, countedKeys, buildSchedule, countServed, publicView, adminExtras, editableCats, needCat,
   eventView, publicVol, mineView,
 };

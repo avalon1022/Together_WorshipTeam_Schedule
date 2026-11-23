@@ -34,15 +34,16 @@ function ctxOf(data, config) {
   })).sort((a, b) => a.id.localeCompare(b.id));
   const events = Object.values(data.events)
     .filter(e => e.name && /^\d{4}-\d{2}-\d{2}$/.test(e.date) && (e.slots || []).length && (e.teams || []).some(t => catSet.indexOf(t) >= 0))
-    .map(e => ({ id: e.id, name: e.name, date: e.date, teams: e.teams.filter(t => catSet.indexOf(t) >= 0), slots: e.slots }))
+    .map(e => ({ id: e.id, name: e.name, date: e.date, teams: e.teams.filter(t => catSet.indexOf(t) >= 0), slots: e.slots, replaces: !!e.replaces }))
     .sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name));
-  const confirmed = {}, overrides = {};
+  const confirmed = {}, overrides = {}, sunMode = {};
   Object.keys(data.months).forEach(m => {
     const doc = data.months[m] || {};
     overrides[m] = doc.overrides || {};
+    Object.assign(sunMode, doc.sunMode || {});
     Object.keys(doc.finals || {}).forEach(c => { confirmed[m + '|' + c] = doc.finals[c]; });
   });
-  return { cats, roles, vols, events, confirmed, overrides, serviceTimes: config.SERVICE_TIMES };
+  return { cats, roles, vols, events, confirmed, overrides, sunMode, serviceTimes: config.SERVICE_TIMES };
 }
 
 const adminOf = u => (u && u.admin && (u.admin.all || (u.admin.cats || []).length) ? { all: !!u.admin.all, cats: u.admin.all ? [] : (u.admin.cats || []) } : null);
@@ -398,8 +399,16 @@ ADMIN.saveEvent = (tx, ctx, admin, b, month) => {
   });
   if (uniq(slots.map(s => s.k)).length !== slots.length) fail('시간대 정보가 겹쳐요. 새로고침 후 다시 저장해 주세요.');
 
+  // 주일 예배 대체: 주일 날짜에만, 전체 관리자만 바꿀 수 있어요. (팀 담당자가 고치면 기존 값 유지)
+  let replaces = !!(cur && cur.replaces);
+  if (admin.all) replaces = !!ev.replaces;
+  else if (!!ev.replaces !== replaces) fail('주일 예배 대체는 전체 관리자만 설정할 수 있어요.', 'forbidden');
+  if (replaces && new Date(date + 'T00:00:00').getDay() !== 0) fail('주일 예배 대체는 주일(일요일) 날짜에만 할 수 있어요.');
+
   const id = cur ? cur.id : newId(6).toLowerCase();
-  tx.putEvent({ id, name, date, teams, slots, updatedAt: nowIso() });
+  const doc = { id, name, date, teams, slots, updatedAt: nowIso() };
+  if (replaces) doc.replaces = true;
+  tx.putEvent(doc);
   // 날짜를 바꿨다면 봉사자들이 체크해 둔 가능 여부도 새 날짜로 옮깁니다.
   if (cur && cur.date !== date) {
     const tag = '|e' + id + '_';
@@ -409,8 +418,10 @@ ADMIN.saveEvent = (tx, ctx, admin, b, month) => {
     });
   }
   const months = uniq([month, date.slice(0, 7)].concat(cur ? [cur.date.slice(0, 7)] : []));
-  const touchedTeams = uniq(teams.concat(cur ? cur.teams : []));
-  return { sync: [].concat(...months.map(m => touchedTeams.map(t => [m, t]))) };
+  // 주일 대체가 걸려 있으면 그 주일 예배(모든 팀)도 바뀌므로 모든 팀 캘린더를 맞춥니다.
+  const touchedTeams = replaces || (cur && cur.replaces) ? L.catNames(ctx) : uniq(teams.concat(cur ? cur.teams : []));
+  const replChanged = replaces !== !!(cur && cur.replaces) || (replaces && cur && cur.date !== date);
+  return { sync: [].concat(...months.map(m => touchedTeams.map(t => [m, t]))), warn: replChanged ? months.map(m => finalWarn(ctx, m)).filter(Boolean)[0] || '' : '' };
 };
 
 ADMIN.deleteEvent = (tx, ctx, admin, b) => {
@@ -418,14 +429,35 @@ ADMIN.deleteEvent = (tx, ctx, admin, b) => {
   const cur = ctx.events.find(e => e.id === String(b.id));
   if (!cur) return null;
   if (!cur.teams.every(t => cats.indexOf(t) >= 0)) fail('다른 팀이 포함된 이벤트는 전체 관리자만 지울 수 있어요.', 'forbidden');
+  if (cur.replaces && !admin.all) fail('주일 예배를 대체한 일정은 전체 관리자만 지울 수 있어요.', 'forbidden');
   tx.delEvent(cur.id);
   const tag = '|e' + cur.id + '_';
   Object.values(tx.data.vols).forEach(v => {
     if (!(v.dates || []).some(x => x.indexOf(tag) > 0)) return;
     tx.putVol(Object.assign({}, v, { dates: v.dates.filter(x => x.indexOf(tag) < 0) }));
   });
-  return { sync: cur.teams.map(t => [cur.date.slice(0, 7), t]) };
+  return { sync: (cur.replaces ? L.catNames(ctx) : cur.teams).map(t => [cur.date.slice(0, 7), t]) };
 };
+
+// 주일 예배 변경 (전체 관리자): mode = '' (1·2부) | 'only1' | 'only2'
+ADMIN.setSunMode = (tx, ctx, admin, b, month) => {
+  if (!admin.all) fail('주일 예배 변경은 전체 관리자만 할 수 있어요.', 'forbidden');
+  const date = String(b.date || '');
+  if (L.sundays(month).indexOf(date) < 0) fail('이 달의 주일 날짜가 아니에요. 새로고침해 주세요.');
+  const mode = String(b.mode || '');
+  if (['', 'only1', 'only2'].indexOf(mode) < 0) fail('알 수 없는 변경이에요.');
+  const doc = monthDoc(tx, month);
+  const sm = Object.assign({}, doc.sunMode || {});
+  if (mode) sm[date] = mode; else delete sm[date];
+  doc.sunMode = sm;
+  tx.putMonth(month, doc);
+  return { sync: L.catNames(ctx).map(c => [month, c]), warn: finalWarn(ctx, month) };
+};
+// 이미 확정된 팀은 확정 당시 배정이 그대로 남으므로 다시 확정하도록 안내합니다.
+function finalWarn(ctx, month) {
+  const fin = L.catNames(ctx).filter(c => ctx.confirmed[month + '|' + c]);
+  return fin.length ? `확정된 ${fin.join('·')} 스케줄은 확정 당시 배정이 그대로예요. 바뀐 예배 구성으로 다시 배정하려면 확정을 해제한 뒤 다시 확정해 주세요.` : '';
+}
 
 // 관리자 지정 (전체 관리자만). admin: { all: bool, cats: [] } 또는 null
 ADMIN.setAdmin = (tx, ctx, admin, b) => {
@@ -455,7 +487,7 @@ async function adminAction(deps, auth, action, body) {
     const ctx = ctxOf(tx.data, deps.config);
     return fn(tx, ctx, admin, body, month) || {};
   });
-  const notes = [];
+  const notes = res.warn ? [res.warn] : [];
   for (const [m, c] of uniq((res.sync || []).map(x => x.join('|'))).map(x => x.split('|'))) {
     const n = await syncCalendarSafe(deps, m, c);
     if (n) notes.push(n);

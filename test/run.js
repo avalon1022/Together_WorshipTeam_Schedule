@@ -362,5 +362,57 @@ const L = require('../functions/src/logic');
     ok(v8.push === null && r8.status === 400, 'push off when not configured');
   }
 
+  /* ---------- 주일 예배 변경 ---------- */
+  {
+    const S9 = makeServer({ kakaoUsers });
+    const su = await S9.login('c1'), team = await S9.login('c3');
+    const post = (who, path, body) => S9.call('POST', path, { cookie: who.cookie, body: Object.assign({ month: M }, body) });
+    await post(su, '/api/setup', { code: 'SETUP-123' });
+    await post(su, '/api/admin/setAdmin', { kakaoId: '1003', admin: { cats: ['찬양팀'] } });
+    for (const n of ['음향A', '음향B']) await post(su, '/api/admin/saveVolunteer', { name: n, roles: ['음향'] });
+    await post(su, '/api/admin/saveVolunteer', { name: '인도C', roles: ['인도'] });
+    let v = (await S9.call('GET', '/api/view?month=' + M, { cookie: su.cookie })).json;
+    const A = v.vols.find(x => x.name === '음향A').id, B = v.vols.find(x => x.name === '음향B').id, C = v.vols.find(x => x.name === '인도C').id;
+    // 미리 연합예배 이벤트 만들어 두고 가능 체크
+    let r = await post(su, '/api/admin/saveEvent', { event: { name: '연합예배', date: dec[2], teams: ['방송팀', '찬양팀'], slots: [{ label: '예배', start: '11:00', end: '12:30' }] } });
+    const ev = r.json.events.find(e => e.name === '연합예배');
+    for (const id of [A, B, C]) await post(su, '/api/admin/saveDates', { id, dates: dec.flatMap(both).concat([dec[2] + '|e' + ev.id + '_s1']) });
+    await post(su, '/api/admin/setFinal', { cat: '방송팀' });
+    const calKeys = () => Object.keys(S9.adapter.docs['calendar/' + M + '|방송팀'].map).sort();
+    ok(calKeys().includes(dec[1] + '|2'), 'calendar has 2부 before change');
+
+    r = await post(team, '/api/admin/setSunMode', { date: dec[1], mode: 'only1' });
+    ok(r.status === 403, 'team admin cannot change Sunday services');
+    r = await post(su, '/api/admin/setSunMode', { date: '2026-12-08', mode: 'only1' });
+    ok(r.status === 400, 'non-Sunday date rejected');
+    r = await post(su, '/api/admin/setSunMode', { date: dec[1], mode: 'only1' });
+    ok(r.status === 200 && r.json.sunMode[dec[1]] === 'only1' && Object.keys(r.json.schedule.slots[dec[1]]).join() === '1', 'only1 removes 2부');
+    ok(/확정된 방송팀/.test(r.json.notice || ''), 'warns that confirmed team keeps old assignment');
+    ok(!calKeys().includes(dec[1] + '|2') && calKeys().includes(dec[1] + '|1'), 'calendar 2부 removed after change');
+    r = await post(su, '/api/admin/setSunMode', { date: dec[3], mode: 'only2' });
+    ok(Object.keys(r.json.schedule.slots[dec[3]]).join() === '2', 'only2 keeps 2부');
+
+    // 주일 대체
+    r = await post(team, '/api/admin/saveEvent', { event: { name: '찬양집회', date: dec[0], teams: ['찬양팀'], replaces: true, slots: [{ start: '11:00' }] } });
+    ok(r.status === 403, 'team admin cannot create replacing event');
+    r = await post(su, '/api/admin/saveEvent', { event: { name: '목요집회', date: '2026-12-10', teams: ['찬양팀'], replaces: true, slots: [{ start: '19:00' }] } });
+    ok(r.status === 400, 'replacing event must be on Sunday');
+    r = await post(su, '/api/admin/saveEvent', { event: Object.assign({}, ev, { replaces: true }) });
+    v = r.json;
+    ok(v.sunMode[dec[2]] === 'replaced' && !v.schedule.slots[dec[2]]['1'] && v.schedule.slots[dec[2]]['e' + ev.id + '_s1'], 'replacing event removes Sunday services');
+    ok(v.events.find(e => e.id === ev.id).replaces === true, 'event marked as replacing');
+    ok(v.vols.find(x => x.id === C).stats.now === 4, 'replacing event counts as Sunday');
+    ok(v.schedule.slots[dec[2]]['e' + ev.id + '_s1']['인도'][0].id === C, 'replacing event is assigned');
+    ok(!calKeys().some(k => k.startsWith(dec[2] + '|') && !k.includes('|e')), 'calendar Sunday entries removed for replaced day');
+    // 팀 담당자는 대체 일정을 지우거나 대체를 풀 수 없음
+    r = await post(team, '/api/admin/deleteEvent', { id: ev.id });
+    ok(r.status === 403, 'team admin cannot delete replacing event');
+    // 대체 해제 → 주일 복원, 가능 체크도 그대로 살아남
+    r = await post(su, '/api/admin/saveEvent', { event: Object.assign({}, ev, { replaces: false }) });
+    ok(!r.json.sunMode[dec[2]] && r.json.schedule.slots[dec[2]]['1'] && r.json.vols.find(x => x.id === C).stats.now === 4, 'unreplace restores Sunday');
+    r = await post(su, '/api/admin/setSunMode', { date: dec[1], mode: '' });
+    ok(!r.json.sunMode[dec[1]] && r.json.schedule.slots[dec[1]]['2'], 'back to both services');
+  }
+
   summary();
 })().catch(e => { console.error(e); process.exitCode = 1; });

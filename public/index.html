@@ -326,7 +326,7 @@ function datesHtml(f){
   const days=sundays(state.month),allowed=allowedSvcs(f);
   const lockNotes=Object.keys(f.svcLock).filter(c=>f.svcLock[c]&&f.roles.some(r=>roleCat(r)===c)).map(c=>`${jo(c,"은","는")} ${svcLabel(f.svcLock[c])}로 고정돼 있어요.`);
   return `<div class="field"><span class="label">${esc(mLabel(state.month))} 중 봉사 가능한 예배</span>
-    <div class="days cards">${days.map(d=>`<div class="daycard"><span class="d">${+d.slice(8)}일</span><div class="svcs">${SVCS.map(s=>{
+    <div class="days cards">${days.map(d=>!sunSvcs(d).length?`<div class="daycard"><span class="d">${+d.slice(8)}일</span><div class="svcs"><span class="hint">특별 일정으로 대체 · 아래에서 체크해 주세요</span></div></div>`:`<div class="daycard"><span class="d">${+d.slice(8)}일</span><div class="svcs">${sunSvcs(d).map(s=>{
       const k=d+"|"+s,on=f.dates.includes(k),dis=!allowed.includes(s);
       return `<button class="svc" data-day="${k}" aria-pressed="${on}" ${dis?"disabled":""}>${svcLabel(s)}<small>${(V().dayCounts||{})[k]||0}명 가능</small></button>`}).join("")}</div></div>`).join("")}</div>
     ${lockNotes.map(n=>`<span class="hint">${esc(n)}</span>`).join("")}
@@ -339,7 +339,7 @@ function eventsHtml(f){
   return `<div class="field"><span class="label">${esc(mLabel(state.month))} 특별 일정</span>
     <div class="evlist">${evs.map(e=>{const mine=!myTeams.length||e.teams.some(t=>myTeams.includes(t));
       return `<div class="evcard${mine?"":" off"}">
-        <div class="evhead"><b>${esc(e.name)}</b><span class="meta">${+e.date.slice(5,7)}월 ${+e.date.slice(8)}일 (${dayName(e.date)}) · ${esc(e.teams.join("·"))}</span></div>
+        <div class="evhead"><b>${esc(e.name)}</b><span class="meta">${+e.date.slice(5,7)}월 ${+e.date.slice(8)}일 (${dayName(e.date)})${e.replaces?" · 주일 예배 대체":""} · ${esc(e.teams.join("·"))}</span></div>
         <div class="evslots">${e.slots.map(sl=>{const k=e.date+"|e"+e.id+"_"+sl.k,on=f.dates.includes(k);
           return `<button class="svc" data-day="${k}" aria-pressed="${on}" ${mine?"":"disabled"}>${esc(sl.label)}<small>${esc(tRange(sl.start,sl.end))} · ${(V().dayCounts||{})[k]||0}명 가능</small></button>`}).join("")}</div>
         ${mine?"":`<span class="hint">${esc(e.teams.join("·"))} 봉사자만 체크할 수 있어요.</span>`}</div>`}).join("")}</div></div>`;
@@ -412,10 +412,13 @@ const WD=["일","월","화","수","목","금","토"];
 const dayName=d=>WD[new Date(d+"T00:00:00").getDay()];
 const tRange=(a,b)=>a?(b?`${a}~${b}`:a):"";
 // 이 달의 배정 단위: 주일(1부·2부) 묶음과 이벤트 묶음
+// 그 주일에 열리는 부 (관리자가 '1부만'·'2부만'으로 바꾸거나 특별 일정으로 대체했으면 달라짐)
+const sunSvcs=d=>{const m=(V().sunMode||{})[d];return m==="replaced"?[]:m==="only1"?["1"]:m==="only2"?["2"]:SVCS};
+const isMaster=()=>!!(V().admin&&V().admin.all);
 function blocks(){
-  const out=sundays(state.month).map(d=>({d,sunday:true,title:"주일",group:"sun",teams:null,
-    occ:SVCS.map(s=>({d,s,label:svcLabel(s),time:"",sunday:true,group:"sun"}))}));
-  (V().events||[]).forEach(e=>out.push({d:e.date,sunday:false,title:e.name,group:"e"+e.id,teams:e.teams,event:e,
+  const out=sundays(state.month).filter(d=>sunSvcs(d).length).map(d=>({d,sunday:true,title:"주일",group:"sun",teams:null,
+    occ:sunSvcs(d).map(s=>({d,s,label:svcLabel(s),time:"",sunday:true,group:"sun"}))}));
+  (V().events||[]).forEach(e=>out.push({d:e.date,sunday:false,replaces:!!e.replaces,title:e.name,group:"e"+e.id,teams:e.teams,event:e,
     occ:e.slots.map(sl=>({d:e.date,s:"e"+e.id+"_"+sl.k,label:sl.label,time:tRange(sl.start,sl.end),sunday:false,group:"e"+e.id,teams:e.teams}))}));
   return out.sort((a,b)=>a.d.localeCompare(b.d)||(a.sunday===b.sunday?0:a.sunday?-1:1));
 }
@@ -495,10 +498,10 @@ function renderSchedule(){
   const head2=`<tr><th>날짜</th><th>예배</th>${groups.map(g=>g.roles.map((r,i)=>`<th${i===0?' class="first"':""}>${esc(r.name)}</th>`).join("")).join("")}</tr>`;
   const head1=groups.length>1?`<tr><th></th><th></th>${groups.map(g=>`<th class="grp" colspan="${g.roles.length}">${esc(g.cat)}</th>`).join("")}</tr>`:"";
   const shown=blocks().filter(b=>b.sunday||b.teams.some(t=>cats.includes(t)));
-  const rows=shown.map(b=>b.occ.map((o,oi)=>`<tr class="${oi===b.occ.length-1?"blast":"bmid"}${b.sunday?"":" evrow"}">${oi===0?`<td class="date" rowspan="${b.occ.length}">${dLabel(b.d)}<small>${b.sunday?"주일":`${esc(b.title)} · ${dayName(b.d)}`}</small></td>`:""}<td class="svcl">${esc(o.label)}${o.time?`<small>${esc(o.time)}</small>`:""}</td>${groups.map(g=>g.roles.map((r,i)=>cellHtml(o.d,o.s,r,i===0,b.teams)).join("")).join("")}</tr>`).join("")).join("");
+  const rows=shown.map(b=>b.occ.map((o,oi)=>`<tr class="${oi===b.occ.length-1?"blast":"bmid"}${b.sunday?"":" evrow"}">${oi===0?`<td class="date" rowspan="${b.occ.length}">${dLabel(b.d)}<small>${b.sunday?"주일":`${esc(b.title)} · ${b.replaces?"주일 대체":dayName(b.d)}`}</small></td>`:""}<td class="svcl">${esc(o.label)}${o.time?`<small>${esc(o.time)}</small>`:""}</td>${groups.map(g=>g.roles.map((r,i)=>cellHtml(o.d,o.s,r,i===0,b.teams)).join("")).join("")}</tr>`).join("")).join("");
   // 이번 달 봉사한 주일 수 (보고 있는 팀 기준)
   const served={};
-  for(const d of days)for(const s of SVCS)for(const g of groups)for(const r of g.roles)cellPeople(slots,d,s,r.name).forEach(p=>{(served[p.id]=served[p.id]||new Set()).add(d)});
+  for(const b of blocks().filter(b=>b.sunday||b.replaces))for(const o of b.occ)for(const g of groups)for(const r of g.roles)cellPeople(slots,o.d,o.s,r.name).forEach(p=>{(served[p.id]=served[p.id]||new Set()).add(o.d)});
   const inView=v=>v.roles.some(r=>cats.includes(roleCat(r)));
   const list=V().vols.filter(v=>inView(v)||served[v.id]).map(v=>{const n=served[v.id]?served[v.id].size:0;
     return [v.name,n,admin?`${n}회 / 가능 ${v.stats.avail}주 · 지난 2달 ${v.stats.recent}회`:`${n}회`]}).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],"ko"));
@@ -527,14 +530,28 @@ function renderSchedule(){
 }
 
 const blankEvent=()=>({id:"",name:"",date:"",teams:myCats().length===1?[...myCats()]:[],slots:[{k:"",label:"",start:"19:00",end:"20:30"}]});
+// 주일 예배 변경 (전체 관리자): 이 달의 주일마다 1·2부 / 1부만 / 2부만, 특별 일정 대체 표시
+function sundayAdminHtml(){
+  const evs=V().events||[];
+  return `<section class="panel" style="margin-top:20px" id="sunAdmin">
+    <h2>주일 예배 변경 · ${esc(mLabel(state.month))}</h2>
+    <p class="hint">특정 주일에 한 부만 드리면 ‘1부만’ 또는 ‘2부만’을 고르세요. 그날은 그 부만 배정되고 입력 화면에도 그 부만 나와요. 주일 예배를 다른 예배(예: 연합예배)로 바꾸려면 아래 ‘특별 일정 만들기’에서 그 주일을 고르고 ‘정기 예배를 이 일정으로 대체’를 체크하세요.</p>
+    <div class="list" style="margin-top:10px">${sundays(state.month).map(d=>{const rp=evs.filter(e=>e.replaces&&e.date===d);const m=(V().sunMode||{})[d]||"";
+      return `<div class="item" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><b>${dLabel(d)}</b>
+        ${rp.length?`<span class="meta">특별 일정 ‘${esc(rp.map(e=>e.name).join("’, ‘"))}’(으)로 대체</span>`
+        :`<select class="small" data-sunmode="${d}" aria-label="${dLabel(d)} 예배"><option value="" ${!m?"selected":""}>1부·2부 (평소)</option><option value="only1" ${m==="only1"?"selected":""}>1부만</option><option value="only2" ${m==="only2"?"selected":""}>2부만</option></select>`}</div>`}).join("")}</div>
+    <div class="row" style="margin-top:8px">${toastHtml("sun")}</div>
+  </section>`;
+}
+
 function eventsAdminHtml(){
   const list=V().allEvents||[],d=state.evDraft;
   const slotTxt=e=>e.slots.map(sl=>`${sl.label} ${tRange(sl.start,sl.end)}`).join(", ");
   return `<section class="panel" style="margin-top:20px" id="evAdmin">
     <h2>특별 일정 (비정기 이벤트)</h2>
-    <p class="hint">성탄 이브 예배, 수련회처럼 주일이 아닌 일정을 만들면 ‘가능한 날짜 입력’과 스케줄 표에 함께 나오고 자동 배정돼요. 인원은 평소 역할 인원과 같고, 봉사 횟수에는 넣지 않아요.</p>
+    <p class="hint">성탄 이브 예배, 수련회처럼 주일이 아닌 일정을 만들면 ‘가능한 날짜 입력’과 스케줄 표에 함께 나오고 자동 배정돼요. 인원은 평소 역할 인원과 같고, 봉사 횟수에는 넣지 않아요. 단, ‘주일 예배 대체’로 만든 일정은 그 주일 예배 대신 열리고 주일처럼 횟수에 넣어요.</p>
     <div class="list" style="margin:12px 0">${list.length?list.map(e=>`<div class="item">
-      <div><b>${esc(e.name)}</b> <span class="meta">${+e.date.slice(5,7)}월 ${+e.date.slice(8)}일 (${dayName(e.date)}) · ${esc(e.teams.join("·"))}</span>
+      <div><b>${esc(e.name)}</b>${e.replaces?` <span class="badge">주일 대체</span>`:""} <span class="meta">${+e.date.slice(5,7)}월 ${+e.date.slice(8)}일 (${dayName(e.date)}) · ${esc(e.teams.join("·"))}</span>
         <div class="meta">${esc(slotTxt(e))}</div></div>
       ${e.editable?`<div class="row"><button class="btn ghost small" data-evedit="${esc(e.id)}">수정</button>
         <button class="btn danger small" data-evdel="${esc(e.id)}">${state.confirmEvDel===e.id?"한 번 더 누르면 삭제":"삭제"}</button></div>`:`<span class="meta">다른 팀 포함 · 전체 관리자만 수정</span>`}
@@ -546,6 +563,7 @@ function eventsAdminHtml(){
         <label class="field"><span class="label">날짜</span><input type="date" id="evDate" value="${esc(d.date)}"></label>
       </div>
       <div class="field"><span class="label">필요한 팀</span><div class="chips">${myCats().map(c=>`<button class="chip" data-evteam="${esc(c)}" aria-pressed="${d.teams.includes(c)}">${esc(c)}</button>`).join("")}</div></div>
+      ${isMaster()&&d.date&&new Date(d.date+"T00:00:00").getDay()===0?`<label class="check"><input type="checkbox" id="evReplaces" ${d.replaces?"checked":""}> 이 주일의 정기 예배(1·2부)를 이 일정으로 대체 <span class="meta">· 봉사 횟수에 넣어요</span></label>`:d.replaces?`<p class="hint">주일 예배를 대체하는 일정이에요. 날짜는 주일이어야 해요.</p>`:""}
       <div class="field"><span class="label">시간대</span>
         ${d.slots.map((sl,i)=>`<div class="slotrow">
           <input type="text" id="evl${i}" data-evs="${i}" data-k="label" maxlength="12" placeholder="${d.slots.length>1?(i+1)+"부":"예배"}" value="${esc(sl.label)}" aria-label="시간대 이름">
@@ -744,6 +762,7 @@ function renderSettings(){
       <p class="hint">숫자는 1부·2부 각각 필요한 인원입니다. 역할 이름은 팀끼리 겹치지 않게 지어 주세요. ↑↓로 순서를 바꾸고 저장하면 스케줄 표·입력 화면·카톡 복사에 그 순서대로 나와요.</p>
     </section>
   </div>
+  ${master?sundayAdminHtml():""}
   ${eventsAdminHtml()}
   ${master?usersAdminHtml():""}
   ${master?pushAdminHtml():""}
@@ -865,7 +884,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="evNew"){state.evDraft=blankEvent();return render()}
   if(t.id==="evCancel"){state.evDraft=null;return render()}
   if(t.dataset.evedit){const e=(V().allEvents||[]).find(x=>x.id===t.dataset.evedit);if(!e)return;
-    state.evDraft={id:e.id,name:e.name,date:e.date,teams:[...e.teams],slots:e.slots.map(sl=>({...sl}))};render();
+    state.evDraft={id:e.id,name:e.name,date:e.date,teams:[...e.teams],slots:e.slots.map(sl=>({...sl})),replaces:!!e.replaces};render();
     const f=$("#evAdmin");if(f)f.scrollIntoView({block:"start"});return}
   if(t.dataset.adsave){const k=t.dataset.adsave,d=state.adminDraft[k];if(!d)return;
     const admin=d.level==="all"?{all:true}:d.level==="team"&&d.cats.length?{cats:d.cats}:null;
@@ -905,6 +924,10 @@ document.addEventListener("change",e=>{
   if(t.dataset.vlock){const dr=draftOf(t.dataset.vlock),c=t.dataset.vcat;
     dr.lockedCats=t.checked?[...new Set([...dr.lockedCats,c])]:dr.lockedCats.filter(x=>x!==c)}
   if(t.dataset.vsvc){const dr=draftOf(t.dataset.vsvc);dr.svcLock={...dr.svcLock,[t.dataset.vcat]:t.value};if(!t.value)delete dr.svcLock[t.dataset.vcat]}
+  if(t.dataset.sunmode){const d=t.dataset.sunmode,v=t.value;
+    run("admin/setSunMode",{month:state.month,date:d,mode:v},`${dLabel(d)} 예배를 ${v==="only1"?"1부만으로":v==="only2"?"2부만으로":"평소대로(1부·2부)"} 바꿨어요.`,"sun");return}
+  if(t.id==="evReplaces"&&state.evDraft){state.evDraft.replaces=t.checked;return}
+  if(t.id==="evDate"&&state.evDraft){state.evDraft.date=t.value;if(new Date(t.value+"T00:00:00").getDay()!==0)state.evDraft.replaces=false;return render()}
   if(t.dataset.vprio){const dr=draftOf(t.dataset.vprio);dr.prio={...(dr.prio||{}),[t.dataset.vcat]:t.value};if(!t.value)delete dr.prio[t.dataset.vcat]}
 });
 document.addEventListener("input",e=>{
