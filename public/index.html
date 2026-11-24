@@ -152,6 +152,16 @@ select.small{width:auto;padding:5px 8px;font-size:13px}
 .whoami{justify-content:space-between;margin-bottom:12px;font-size:14px;color:var(--muted)}
 .whoami b{color:var(--ink)}
 .btn.small{padding:6px 12px;font-size:13px}
+.notices{display:flex;flex-direction:column;gap:10px;margin:0 0 16px}
+.notice{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.notice.pin{border-color:var(--accent)}
+.notice .nh{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px}
+.notice .nh b{font-size:15px}
+.notice .nb{white-space:pre-wrap;word-break:break-word;margin:6px 0 0;font-size:14px;line-height:1.55}
+.notice .meta{font-size:12px}
+.badge.new{color:var(--accent);border-color:var(--accent)}
+.prefs{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+textarea.nbody{width:100%;min-height:96px;resize:vertical;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:inherit}
 .install{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 0 16px}
 .install img{width:40px;height:40px;border-radius:10px;flex:none}
 .install .txt{flex:1;min-width:180px;font-size:14px}
@@ -236,7 +246,7 @@ const blankNew=()=>({name:"",roles:[],lockedCats:[],svcLock:{},prio:{}});
 const state={month:shiftMonth(monthKeyOf(new Date()),1),view:null,loading:true,error:"",loginMsg:"",formOwner:"",
   tab:"input",form:blankForm(),filter:"전체",editCell:null,volDraft:{},newVol:blankNew(),roleDraft:{},
   toast:"",toastErr:false,toastAt:"",busy:false,confirmDel:null,confirmReset:null,confirmUnlink:null,
-  linkPick:"",newReg:false,proxyId:"",evDraft:null,confirmEvDel:null,adminDraft:{},adminPick:"",volOpen:"",volQuery:"",volFilter:"all",newVolOpen:false,pushLocal:"",pushChecking:false};
+  linkPick:"",newReg:false,proxyId:"",evDraft:null,confirmEvDel:null,adminDraft:{},adminPick:"",volOpen:"",volQuery:"",volFilter:"all",newVolOpen:false,pushLocal:"",pushChecking:false,noticesAll:false,noticeDraft:null,noticeSeen:null};
 const V=()=>state.view;
 const isAdmin=()=>!!(V()&&V().admin);
 const myCats=()=>isAdmin()?V().admin.cats:[];
@@ -348,7 +358,7 @@ function eventsHtml(f){
 function renderInput(){
   const me=V().me,f=state.form;
   const top=isAdmin()?proxyBar():"";
-  const put=h=>{$("#view").innerHTML=top+h};
+  const put=h=>{$("#view").innerHTML=noticesHtml()+top+h+(me&&(me.vol||me.admin)?pushCardHtml():"")};
 
   // 관리자가 다른 봉사자 대신 입력
   if(isAdmin()&&state.proxyId){
@@ -486,6 +496,7 @@ function renderSchedule(){
     $("#view").innerHTML=`<div class="panel empty"><b>아직 입력한 봉사자가 없어요</b>‘가능한 날짜 입력’ 탭에서 이름과 가능한 예배를 체크하면 이곳에 스케줄이 자동으로 채워집니다.</div>`;return}
   const cats=state.filter==="전체"?V().cats.map(c=>c.name):[state.filter];
   const groups=cats.map(c=>({cat:c,roles:catRoles(c)})).filter(g=>g.roles.length);
+  const noticeTop=noticesHtml();
   const editable=c=>admin&&myCats().includes(c);
   const cellHtml=(d,s,r,first,teams)=>{
     if(teams&&!teams.includes(r.cat))return `<td${first?' class="first"':""}><span class="na">—</span></td>`;
@@ -508,13 +519,14 @@ function renderSchedule(){
   const finalBtns=admin?cats.filter(c=>myCats().includes(c)).map(c=>finalCats.includes(c)
     ?`<button class="btn danger" data-unfinal="${esc(c)}">${esc(c)} 확정 해제</button>`
     :`<button class="btn" data-final="${esc(c)}">${esc(c)} 확정</button>`).join(""):"";
-  $("#view").innerHTML=`
+  $("#view").innerHTML=`${noticeTop}
   <div class="chips" style="margin-bottom:14px">${["전체",...V().cats.map(c=>c.name)].map(c=>`<button class="chip" data-filter="${esc(c)}" aria-pressed="${state.filter===c}">${esc(c)}</button>`).join("")}</div>
   <div class="toolbar">
     <div class="statuses">${cats.map(c=>`<span class="status ${finalCats.includes(c)?"final":"draft"}">${esc(c)} · ${finalCats.includes(c)?"확정":"자동 배정 초안"}</span>`).join("")}</div>
     <div class="row">
       <button class="btn ghost" id="refresh">새로고침</button>
       <button class="btn ghost" id="copy">카톡용 텍스트 복사</button>
+      ${admin?`<button class="btn ghost" id="copyNext">다음 봉사 안내 복사</button>`:""}
       ${finalBtns}
     </div>
   </div>
@@ -612,6 +624,52 @@ function usersAdminHtml(){
   </section>`;
 }
 
+/* ---------- 공지 ---------- */
+const NOTICE_KEY="noticeSeen";
+function noticesHtml(){
+  const list=V().notices||[];
+  if(!list.length)return "";
+  if(state.noticeSeen===null){try{state.noticeSeen=localStorage.getItem(NOTICE_KEY)||""}catch(e){state.noticeSeen=""}
+    const newest=list.map(n=>n.createdAt).sort().pop()||"";try{if(newest)localStorage.setItem(NOTICE_KEY,newest)}catch(e){}}
+  const shown=state.noticesAll?list:list.slice(0,2);
+  const when=iso=>{const d=new Date(iso);return isNaN(d)?"":`${d.getMonth()+1}월 ${d.getDate()}일`};
+  return `<div class="notices">${shown.map(n=>`<article class="notice${n.pinned?" pin":""}">
+      <div class="nh">${n.pinned?`<span aria-label="고정">📌</span>`:""}<b>${esc(n.title)}</b>
+        ${n.target!=="all"?`<span class="badge">${esc(n.target)}</span>`:""}${state.noticeSeen!==null&&n.createdAt>state.noticeSeen?`<span class="badge new">새 공지</span>`:""}
+        <span class="meta">${esc(n.authorName)} · ${when(n.createdAt)}</span></div>
+      ${n.body?`<p class="nb">${esc(n.body)}</p>`:""}
+    </article>`).join("")}
+    ${list.length>2?`<button class="linkbtn" id="noticesToggle">${state.noticesAll?"공지 접기":`지난 공지 ${list.length-2}개 더 보기`}</button>`:""}
+  </div>`;
+}
+
+// 관리 탭: 공지 쓰기·고치기 (전체 관리자는 전체/팀, 팀 담당자는 자기 팀)
+const blankNotice=()=>({id:"",title:"",body:"",target:isMaster()?"all":(myCats()[0]||""),pinned:false,until:"",push:true});
+function noticesAdminHtml(){
+  const list=V().noticesAdmin||[],d=state.noticeDraft;
+  const targets=[...(isMaster()?[["all","전체"]]:[]),...myCats().map(c=>[c,c])];
+  const form=d?`<div class="newvol" style="margin-top:12px">
+      <span class="label">${d.id?"공지 고치기":"새 공지"}</span>
+      <div class="row"><select id="ntTarget" aria-label="공지 대상">${targets.map(([k,l])=>`<option value="${esc(k)}" ${d.target===k?"selected":""}>${esc(l)}${k==="all"?" 공지":" 공지"}</option>`).join("")}</select>
+        <label class="check"><input type="checkbox" id="ntPinned" ${d.pinned?"checked":""}> 맨 위에 고정</label></div>
+      <input type="text" id="ntTitle" maxlength="60" placeholder="제목" value="${esc(d.title)}">
+      <textarea class="nbody" id="ntBody" maxlength="1000" placeholder="내용 (선택)">${esc(d.body)}</textarea>
+      <label class="field" style="margin:0"><span class="label">게시 종료일 (선택 · 이 날까지 보여요)</span><input type="date" id="ntUntil" value="${esc(d.until)}"></label>
+      <label class="check"><input type="checkbox" id="ntPush" ${d.push?"checked":""}> ${d.id?"고친 내용을 알림으로 다시 보내기":"알림 켠 사람에게 알림 보내기"}</label>
+      <div class="row"><button class="btn" id="ntSave">${d.id?"저장":"올리기"}</button><button class="btn ghost" id="ntCancel">취소</button>${toastHtml("nt")}</div>
+    </div>`:`<div class="row" style="margin-top:8px"><button class="btn" id="ntNew">공지 쓰기</button>${toastHtml("nt")}</div>`;
+  return `<section class="panel" style="margin-top:20px">
+    <h2>공지</h2>
+    <p class="hint">로그인한 봉사자에게 앱 맨 위에 보여요. 팀 공지는 그 팀 봉사자와 관리자에게만 보여요.</p>
+    ${form}
+    ${list.length?`<div class="list" style="margin-top:12px">${list.map(n=>`<div class="item" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+      <div>${n.pinned?"📌 ":""}<b>${esc(n.title)}</b> <span class="badge">${n.target==="all"?"전체":esc(n.target)}</span>${n.expired?` <span class="badge">기간 지남</span>`:""}
+        <div class="meta">${esc(n.authorName)}${n.until?` · ${esc(dLabel(n.until))}까지`:""}</div></div>
+      <div class="row"><button class="btn ghost small" data-ntedit="${esc(n.id)}">수정</button><button class="btn danger small" data-ntdel="${esc(n.id)}">${state.confirmNtDel===n.id?"한 번 더 누르면 삭제":"삭제"}</button></div>
+    </div>`).join("")}</div>`:""}
+  </section>`;
+}
+
 /* ---------- 관리자 푸시 알림 (이 기기) ---------- */
 const pushSupported=()=>"serviceWorker" in navigator&&"PushManager" in window&&"Notification" in window;
 const isStandalone=()=>window.matchMedia("(display-mode: standalone)").matches||navigator.standalone===true;
@@ -621,23 +679,29 @@ async function checkPush(){
   if(state.pushChecking)return;state.pushChecking=true;let st="unsupported";
   try{if(pushSupported()){const reg=await navigator.serviceWorker.ready;const sub=await reg.pushManager.getSubscription();
     st=sub?"on":Notification.permission==="denied"?"denied":"off"}}catch(e){st="unsupported"}
-  state.pushChecking=false;if(st!==state.pushLocal){state.pushLocal=st;if(state.tab==="settings")render()}
+  state.pushChecking=false;if(st!==state.pushLocal){state.pushLocal=st;if(state.tab!=="schedule")render()}
 }
-function pushAdminHtml(){
+// 푸시 알림 카드: 이름을 연결한 봉사자와 관리자가 이 기기에서 알림을 켜고, 받을 알림 종류를 고릅니다.
+function pushCardHtml(){
   const P=V().push;
-  if(!state.pushLocal)setTimeout(checkPush,0);
+  if(P===undefined)return "";
+  const admin=V().me&&V().me.admin,master=!!(admin&&admin.all);
+  if(P&&!P.canSubscribe)return "";
+  if(!state.pushLocal&&P)setTimeout(checkPush,0);
   let body;
-  if(!P)body=`<p>푸시 알림이 아직 설정되지 않았어요. 설치 안내서(README)의 ‘관리자 푸시 알림’ 순서대로 <b>VAPID_PRIVATE_KEY</b>를 등록하고 다시 배포하면 켤 수 있어요.</p>`;
+  if(!P)body=master?`<p>푸시 알림이 아직 설정되지 않았어요. 설치 안내서(README)의 ‘홈 화면 앱과 관리자 푸시 알림’ 순서대로 <b>VAPID_PRIVATE_KEY</b>를 등록하고 다시 배포해 주세요.</p>`:`<p>알림 기능이 아직 준비되지 않았어요.</p>`;
   else if(isIOS()&&!isStandalone())body=`<p>아이폰·아이패드는 <b>홈 화면에 추가한 앱</b>에서만 알림을 받을 수 있어요. 공유 버튼(□↑) → ‘홈 화면에 추가’를 한 뒤, 홈 화면 아이콘으로 앱을 열어 여기서 알림을 켜 주세요.</p>`;
-  else if(state.pushLocal==="unsupported")body=`<p>이 브라우저는 푸시 알림을 지원하지 않아요. 휴대폰의 Chrome·Safari(홈 화면 앱)에서 열어 주세요.</p>`;
-  else if(state.pushLocal==="denied")body=`<p>이 기기에서 알림이 차단돼 있어요. 휴대폰 설정(또는 브라우저 주소창의 자물쇠 → 권한)에서 이 앱의 알림을 허용한 뒤 다시 와 주세요.</p>`;
-  else if(state.pushLocal==="on")body=`<p><b>이 기기에서 알림을 받고 있어요.</b> 봉사자 가입·일정 입력, 다른 관리자의 확정, 매달 ${V().push.remindDay||20}일 미입력자 소식을 알려 드려요.</p>
+  else if(state.pushLocal==="unsupported")body=`<p>이 브라우저는 푸시 알림을 지원하지 않아요. 휴대폰의 Chrome이나 홈 화면 앱에서 열어 주세요.</p>`;
+  else if(state.pushLocal==="denied")body=`<p>이 기기에서 알림이 차단돼 있어요. 휴대폰 설정(또는 주소창의 자물쇠 → 권한)에서 이 앱의 알림을 허용한 뒤 다시 와 주세요.</p>`;
+  else if(state.pushLocal==="on")body=`<p><b>이 기기에서 알림을 받고 있어요.</b> 받을 알림을 골라 주세요.</p>
+    <div class="prefs">${[["duty",`봉사 전날 (저녁 ${P.dutyHour}시)`],["notice","공지"],...(master?[["admin","관리자 소식"]]:[])].map(([k,l])=>`<button class="chip" data-pref="${k}" aria-pressed="${!!P.prefs[k]}">${l}</button>`).join("")}</div>
+    ${master?`<p class="hint">관리자 소식: 봉사자 가입·일정 입력, 다른 관리자의 확정, 매달 ${P.remindDay}일 미입력자</p>`:""}
     <div class="row"><button class="btn ghost" id="pushTest">시험 알림 보내기</button><button class="btn ghost" id="pushOff">이 기기 알림 끄기</button></div>`;
-  else body=`<p>봉사자가 가입하거나 일정을 넣을 때, 다른 관리자가 스케줄을 확정할 때, 매달 미입력자가 있을 때 이 기기로 알림을 받아요.</p>
+  else body=`<p>봉사 전날 저녁 ${P.dutyHour}시에 내 봉사를 알려 드리고, 새 공지도 바로 알려 드려요.${master?" 관리자 소식(가입·일정 입력·확정·미입력자)도 받을 수 있어요.":""}</p>
     <div class="row"><button class="btn" id="pushOn" ${state.pushLocal?"":"disabled"}>이 기기에서 알림 받기</button></div>`;
   return `<section class="panel" style="margin-top:20px">
-    <h2>푸시 알림</h2>${body}
-    ${P&&P.devices?`<p class="hint">알림을 켠 기기: ${P.devices}대 · 전체 관리자에게만 보내요.</p>`:`<p class="hint">전체 관리자에게만 보내요.</p>`}
+    <h2>알림 받기</h2>${body}
+    ${P&&P.devices?`<p class="hint">이 계정으로 알림을 켠 기기: ${P.devices}대</p>`:""}
     <div class="row">${toastHtml("push")}</div>
   </section>`;
 }
@@ -735,7 +799,7 @@ function renderSettings(){
   ${toastHtml()}
   <div class="grid2" style="margin-top:12px">
     <section class="panel">
-      <div class="row" style="justify-content:space-between"><h2 style="margin:0">봉사자 ${V().vols.length}명</h2>
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">봉사자 ${V().vols.length}명${V().pushStats&&V().push?` <span class="meta" style="font-weight:400">· 알림 켠 봉사자 ${V().pushStats.on}/${V().pushStats.total}명</span>`:""}</h2>
         <button class="btn ${state.newVolOpen?"ghost":""} small" id="nvToggle">${state.newVolOpen?"등록 닫기":"+ 봉사자 등록"}</button></div>
       ${state.newVolOpen?`<div class="newvol" style="margin-top:12px">
         <span class="label">봉사자 미리 등록</span>
@@ -762,10 +826,11 @@ function renderSettings(){
       <p class="hint">숫자는 1부·2부 각각 필요한 인원입니다. 역할 이름은 팀끼리 겹치지 않게 지어 주세요. ↑↓로 순서를 바꾸고 저장하면 스케줄 표·입력 화면·카톡 복사에 그 순서대로 나와요.</p>
     </section>
   </div>
+  ${noticesAdminHtml()}
   ${master?sundayAdminHtml():""}
   ${eventsAdminHtml()}
   ${master?usersAdminHtml():""}
-  ${master?pushAdminHtml():""}
+  ${pushCardHtml()}
   <section class="panel" style="margin-top:20px">
     <h2>구글 캘린더 연동</h2>
     ${V().calendarReady
@@ -864,9 +929,27 @@ document.addEventListener("click",async e=>{
   if(t.dataset.final)return run("admin/setFinal",{month:M,cat:t.dataset.final},`${t.dataset.final} 스케줄을 확정하고 구글 캘린더에도 올렸어요.`);
   if(t.dataset.unfinal)return run("admin/unsetFinal",{month:M,cat:t.dataset.unfinal},`${t.dataset.unfinal} 확정을 해제하고 캘린더 일정도 지웠어요. 수동으로 정한 칸 외에는 다시 자동 배정됩니다.`);
   if(t.dataset.vrole){const dr=draftOf(t.dataset.vid);dr.roles=toggle(dr.roles,t.dataset.vrole);return render()}
+  if(t.dataset.pref){const k=t.dataset.pref,on=t.getAttribute("aria-pressed")!=="true";
+    return run("push/prefs",{month:M,prefs:{[k]:on}},on?"이 알림을 켰어요.":"이 알림을 껐어요.","push")}
   if(t.id==="pushOn")return pushOn();
   if(t.id==="pushOff")return pushOff();
   if(t.id==="pushTest")return run("push/test",{month:M},"시험 알림을 보냈어요. 잠시 후 도착해요.","push");
+  if(t.id==="noticesToggle"){state.noticesAll=!state.noticesAll;return render()}
+  if(t.id==="ntNew"){state.noticeDraft=blankNotice();return render()}
+  if(t.id==="ntCancel"){state.noticeDraft=null;return render()}
+  if(t.dataset.ntedit){const n=(V().noticesAdmin||[]).find(x=>x.id===t.dataset.ntedit);if(!n)return;
+    state.noticeDraft={id:n.id,title:n.title,body:n.body,target:n.target,pinned:n.pinned,until:n.until,push:false};render();
+    const f=$("#ntTitle");if(f)f.scrollIntoView({block:"center",behavior:"smooth"});return}
+  if(t.dataset.ntdel){const id=t.dataset.ntdel;if(state.confirmNtDel!==id){state.confirmNtDel=id;return render()}
+    state.confirmNtDel=null;if(state.noticeDraft&&state.noticeDraft.id===id)state.noticeDraft=null;
+    return run("admin/deleteNotice",{month:M,id},"공지를 지웠어요.","nt")}
+  if(t.id==="ntSave"){const d=state.noticeDraft;if(!d)return;
+    if(!d.title.trim())return flash("공지 제목을 입력해 주세요.",true,"nt");
+    state.busy=true;let v;
+    try{v=await api("/api/admin/saveNotice",{month:M,notice:d})}catch(e){state.busy=false;if(!authError(e))flash(e.message,true,"nt");return}
+    state.busy=false;state.noticeDraft=null;setView(v);render();
+    return flash(v.pushed===undefined?"공지를 저장했어요.":v.pushed?`공지를 올렸어요. ${v.pushed}대 기기에 알림을 보냈어요.`:"공지를 올렸어요. 아직 알림을 켠 사람이 없어서 알림은 가지 않았어요.",false,"nt")}
+  if(t.id==="copyNext")return copyText(true);
   if(t.id==="nvToggle"){state.newVolOpen=!state.newVolOpen;return render()}
   if(t.dataset.vopen!==undefined){const id=t.dataset.vopen;state.volOpen=state.volOpen===id?"":id;state.confirmDel=state.confirmUnlink=null;return render()}
   if(t.dataset.vfilter){state.volFilter=t.dataset.vfilter;return render()}
@@ -927,6 +1010,8 @@ document.addEventListener("change",e=>{
   if(t.dataset.sunmode){const d=t.dataset.sunmode,v=t.value;
     run("admin/setSunMode",{month:state.month,date:d,mode:v},`${dLabel(d)} 예배를 ${v==="only1"?"1부만으로":v==="only2"?"2부만으로":"평소대로(1부·2부)"} 바꿨어요.`,"sun");return}
   if(t.id==="evReplaces"&&state.evDraft){state.evDraft.replaces=t.checked;return}
+  if(state.noticeDraft){if(t.id==="ntTarget")state.noticeDraft.target=t.value;if(t.id==="ntPinned")state.noticeDraft.pinned=t.checked;
+    if(t.id==="ntUntil")state.noticeDraft.until=t.value;if(t.id==="ntPush")state.noticeDraft.push=t.checked}
   if(t.id==="evDate"&&state.evDraft){state.evDraft.date=t.value;if(new Date(t.value+"T00:00:00").getDay()!==0)state.evDraft.replaces=false;return render()}
   if(t.dataset.vprio){const dr=draftOf(t.dataset.vprio);dr.prio={...(dr.prio||{}),[t.dataset.vcat]:t.value};if(!t.value)delete dr.prio[t.dataset.vcat]}
 });
@@ -936,6 +1021,7 @@ document.addEventListener("input",e=>{
   if(t.id==="nvName")state.newVol.name=t.value;
   if(t.id==="volQuery"){state.volQuery=t.value;render();const q=$("#volQuery");if(q){q.focus();q.setSelectionRange(q.value.length,q.value.length)}}
   if(t.id==="evName")state.evDraft.name=t.value;
+  if(state.noticeDraft){if(t.id==="ntTitle")state.noticeDraft.title=t.value;if(t.id==="ntBody")state.noticeDraft.body=t.value}
   if(t.id==="evDate")state.evDraft.date=t.value;
   if(t.dataset.evs!==undefined){state.evDraft.slots[+t.dataset.evs][t.dataset.k]=t.value}
   if(t.dataset.rc){const r=state.roleDraft[t.dataset.rc][+t.dataset.ri];
@@ -946,11 +1032,17 @@ document.addEventListener("keydown",e=>{
   if(e.target.id==="setupCode")setupAdmin();
 });
 
-async function copyText(){
+// next=true: 오늘 이후 가장 가까운 봉사 날짜 하나만 (단톡방 전날 안내용)
+async function copyText(next){
   const slots=V().schedule.slots;
   const cats=state.filter==="전체"?V().cats.map(c=>c.name):[state.filter];
-  const lines=[`[${mLabel(state.month)} 주일 예배팀 스케줄${state.filter==="전체"?"":" · "+state.filter}]`,""];
-  for(const b of blocks()){
+  let bl=blocks();
+  if(next){const now=new Date();const today=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+    const d=bl.map(b=>b.d).filter(x=>x>=today).sort()[0];
+    if(!d)return flash(`${mLabel(state.month)}에는 남은 봉사가 없어요. 다음 달로 넘어가서 눌러 주세요.`,true);
+    bl=bl.filter(b=>b.d===d)}
+  const lines=next?[`[봉사 안내 · ${dLabel(bl[0].d)}(${dayName(bl[0].d)})]`,""]:[`[${mLabel(state.month)} 주일 예배팀 스케줄${state.filter==="전체"?"":" · "+state.filter}]`,""];
+  for(const b of bl){
     const bc=b.sunday?cats:cats.filter(c=>b.teams.includes(c));if(!bc.length)continue;
     lines.push(b.sunday?`■ ${dLabel(b.d)}`:`★ ${dLabel(b.d)}(${dayName(b.d)}) ${b.title}`);
     for(const o of b.occ){lines.push(` [${o.label}${o.time?" "+o.time:""}]`);
@@ -971,8 +1063,9 @@ async function copyText(){
   // 알림을 눌러 들어온 경우: ?tab=settings&month=2026-12
   if(["input","schedule","settings"].includes(p.get("tab")))state.tab=p.get("tab");
   if(/^\d{4}-\d{2}$/.test(p.get("month")||""))state.month=p.get("month");
+  if(p.get("notice")){state.tab="input";state.noticesAll=true}
   if(p.get("login_error"))state.loginMsg=p.get("login_error");
-  if(p.has("login")||p.has("login_error")||p.has("tab")||p.has("month"))try{history.replaceState(null,"",location.pathname+location.hash)}catch(e){}
+  if(p.has("login")||p.has("login_error")||p.has("tab")||p.has("month")||p.has("notice"))try{history.replaceState(null,"",location.pathname+location.hash)}catch(e){}
 })();
 render();
 load(false);

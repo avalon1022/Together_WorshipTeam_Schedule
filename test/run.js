@@ -298,8 +298,9 @@ const L = require('../functions/src/logic');
     await post(su, '/api/setup', { code: 'SETUP-123' });
     await post(su, '/api/admin/setAdmin', { kakaoId: '1002', admin: { all: true } });
     await post(su, '/api/admin/setAdmin', { kakaoId: '1003', admin: { cats: ['찬양팀'] } });
-    let r = await post(team, '/api/push/subscribe', { subscription: SUB(9) });
-    ok(r.status === 403, 'team admin cannot subscribe');
+    const stranger = await S7.login('c9');
+    let r = await post(stranger, '/api/push/subscribe', { subscription: SUB(9) });
+    ok(r.status === 403 && /이름을 먼저 연결/.test(r.json.error), 'unlinked non-admin cannot subscribe');
     r = await post(su, '/api/push/subscribe', { subscription: { endpoint: 'https://evil.example/x', keys: { p256dh: 'a', auth: 'b' } } });
     ok(r.status === 400, 'unknown push host rejected');
     r = await post(su, '/api/push/subscribe', { subscription: SUB(1), ua: 'iPhone' });
@@ -307,7 +308,8 @@ const L = require('../functions/src/logic');
     await post(su, '/api/push/subscribe', { subscription: SUB(1) });
     await post(su2, '/api/push/subscribe', { subscription: SUB(2) });
     ok(Object.keys(S7.adapter.docs).filter(k => k.startsWith('push/')).length === 2, 'same device not duplicated');
-    ok((await S7.call('GET', '/api/view?month=' + M, { cookie: team.cookie })).json.push === undefined, 'team admin view has no push info');
+    const tv7 = (await S7.call('GET', '/api/view?month=' + M, { cookie: team.cookie })).json;
+    ok(tv7.push && tv7.push.canSubscribe && tv7.push.devices === 0, 'team admin can turn on push');
 
     r = await post(su, '/api/push/test', {});
     ok(r.json.sent === 1 && S7.push.sent.length === 1 && S7.push.sent[0].endpoint.endsWith('dev1'), 'test push goes to own device only');
@@ -412,6 +414,82 @@ const L = require('../functions/src/logic');
     ok(!r.json.sunMode[dec[2]] && r.json.schedule.slots[dec[2]]['1'] && r.json.vols.find(x => x.id === C).stats.now === 4, 'unreplace restores Sunday');
     r = await post(su, '/api/admin/setSunMode', { date: dec[1], mode: '' });
     ok(!r.json.sunMode[dec[1]] && r.json.schedule.slots[dec[1]]['2'], 'back to both services');
+  }
+
+  /* ---------- 공지 · 봉사자 알림 · 전날 알림 ---------- */
+  {
+    const S10 = makeServer({ kakaoUsers });
+    const su = await S10.login('c1'), team = await S10.login('c3'), va = await S10.login('c4'), vb = await S10.login('c5'), anon = null;
+    const post = (who, path, body) => S10.call('POST', path, { cookie: who.cookie, body: Object.assign({ month: M }, body) });
+    const get = who => S10.call('GET', '/api/view?month=' + M, who ? { cookie: who.cookie } : {}).then(r => r.json);
+    const SUB = n => ({ endpoint: 'https://fcm.googleapis.com/fcm/send/n' + n, keys: { p256dh: 'P' + n, auth: 'A' + n } });
+    await post(su, '/api/setup', { code: 'SETUP-123' });
+    await post(su, '/api/admin/setAdmin', { kakaoId: '1003', admin: { cats: ['찬양팀'] } });
+    await post(va, '/api/mine/save', { name: '방송A', roles: ['음향'], dates: dec.flatMap(both), touched: [M] });
+    await post(vb, '/api/mine/save', { name: '찬양B', roles: ['인도'], dates: dec.flatMap(both), touched: [M] });
+    for (const [w, n] of [[su, 1], [team, 3], [va, 4], [vb, 5]]) await post(w, '/api/push/subscribe', { subscription: SUB(n) });
+    S10.push.sent.length = 0;
+    const to = () => S10.push.sent.map(x => x.endpoint.slice(-2)).sort().join();
+
+    // 공지 권한
+    let r = await post(team, '/api/admin/saveNotice', { notice: { title: '전체', target: 'all' } });
+    ok(r.status === 403, 'team admin cannot post to all');
+    r = await post(team, '/api/admin/saveNotice', { notice: { title: '방송', target: '방송팀' } });
+    ok(r.status === 403, 'team admin cannot post to other team');
+    r = await post(su, '/api/admin/saveNotice', { notice: { title: '', target: 'all' } });
+    ok(r.status === 400, 'notice needs title');
+    // 팀 공지 → 그 팀 봉사자 + 전체 관리자 (쓴 사람 제외)
+    r = await post(team, '/api/admin/saveNotice', { notice: { title: '찬양팀 연습', body: '토요일\n7시', target: '찬양팀' } });
+    ok(r.status === 200 && r.json.pushed === 2 && to() === 'n1,n5', 'team notice pushes to team members and super admin');
+    ok(S10.push.sent[0].title === '찬양팀 공지 · 찬양팀 연습' && S10.push.sent[0].body === '토요일 7시', 'notice push text');
+    const nid = r.json.noticesAdmin[0].id;
+    S10.push.sent.length = 0;
+    ok((await get(va)).notices.length === 0 && (await get(vb)).notices[0].body === '토요일\n7시', 'team notice visible only to team');
+    ok((await get(anon)).notices === undefined, 'not shown when logged out');
+    // 수정은 기본으로 알림 안 감
+    r = await post(team, '/api/admin/saveNotice', { notice: { id: nid, title: '찬양팀 연습(변경)', target: '찬양팀', pinned: true } });
+    ok(r.json.pushed === undefined && S10.push.sent.length === 0 && r.json.notices[0].pinned, 'edit does not push by default');
+    // 전체 공지 + 공지 알림 끈 사람 제외
+    await post(vb, '/api/push/prefs', { prefs: { notice: false } });
+    r = await post(su, '/api/admin/saveNotice', { notice: { title: '성탄 준비', target: 'all', pinned: false } });
+    ok(to() === 'n3,n4', 'all notice respects notice pref and skips author');
+    S10.push.sent.length = 0;
+    const gv = await get(va);
+    ok(gv.notices.map(n => n.title).join() === '성탄 준비' && gv.push.prefs.notice === true, 'volunteer sees all notice');
+    ok((await get(vb)).notices[0].title === '찬양팀 연습(변경)', 'pinned first');
+    // 기간 지난 공지 숨김, 관리 목록엔 남음
+    r = await post(su, '/api/admin/saveNotice', { notice: { title: '지난 공지', target: 'all', until: '2020-01-01', push: false } });
+    ok(!(await get(va)).notices.some(n => n.title === '지난 공지') && r.json.noticesAdmin.find(n => n.title === '지난 공지').expired, 'expired hidden for users');
+    ok((await get(team)).noticesAdmin.every(n => n.target === '찬양팀'), 'team admin manages own team notices only');
+    r = await post(team, '/api/admin/deleteNotice', { id: r.json.noticesAdmin.find(n => n.title === '성탄 준비').id });
+    ok(r.status === 403, 'team admin cannot delete all notice');
+    r = await post(team, '/api/admin/deleteNotice', { id: nid });
+    ok(r.status === 200 && !(await get(vb)).notices.some(n => n.id === nid), 'delete notice');
+
+    // 관리자 소식 끄기
+    await post(su, '/api/push/prefs', { prefs: { admin: false } });
+    S10.push.sent.length = 0;
+    await post(team, '/api/admin/setFinal', { cat: '찬양팀' });
+    ok(S10.push.sent.length === 0, 'admin pref off stops admin notices');
+
+    // 알림 켠 봉사자 수
+    let sv = await get(su);
+    ok(sv.pushStats.on === 2 && sv.pushStats.total === 2, 'push stats count duty-enabled volunteers');
+    ok((await get(team)).pushStats.total === 1, 'team admin stats limited to team');
+
+    // 전날 알림: 확정된 찬양팀만 → 찬양B에게만 (12/5 20시 실행)
+    const SS = require('../functions/src/service');
+    S10.push.sent.length = 0;
+    let rd = await SS.remindDuty(S10.env.deps, new Date('2026-12-05T11:00:00Z'));
+    ok(rd.date === dec[0] && rd.assigned === 1 && to() === 'n5', 'duty reminder only for confirmed team');
+    ok(S10.push.sent[0].title === '내일 봉사 안내 · 12월 6일(일)' && /찬양B님, 내일 1부 인도 · 11:00, 2부 인도 · 14:00 봉사가 있어요/.test(S10.push.sent[0].body), 'duty reminder text');
+    await post(su, '/api/admin/setFinal', { cat: '방송팀' });
+    await post(va, '/api/push/prefs', { prefs: { duty: false } });
+    S10.push.sent.length = 0;
+    rd = await SS.remindDuty(S10.env.deps, new Date('2026-12-05T11:00:00Z'));
+    ok(rd.assigned === 2 && rd.people === 1 && to() === 'n5', 'duty pref off respected');
+    rd = await SS.remindDuty(S10.env.deps, new Date('2026-12-06T11:00:00Z'));
+    ok(rd.assigned === 0 && rd.sent === 0, 'no duty on Monday');
   }
 
   summary();

@@ -114,6 +114,16 @@ async function view(deps, auth, q) {
     const admin = adminOf(u);
     v.me = { nickname: (u && u.nickname) || '', vol: L.mineView(ctx.vols.find(x => x.kakaoId === auth.kakaoId)), admin };
     v.setupNeeded = !hasSuper(data) && !!deps.setupCode;
+    const myVol = ctx.vols.find(x => x.kakaoId === auth.kakaoId);
+    v.notices = visibleNotices(data, ctx, auth.kakaoId, admin).map(noticeView);
+    v.push = deps.push ? {
+      publicKey: deps.push.publicKey,
+      devices: Object.values(data.push).filter(s => s.kakaoId === auth.kakaoId).length,
+      canSubscribe: !!(myVol || admin),
+      prefs: prefsOf(u),
+      remindDay: (deps.config.REMIND || {}).day || 20,
+      dutyHour: (deps.config.DUTY_REMIND || {}).hour || 20,
+    } : null;
     if (admin) {
       L.adminExtras(ctx, month, admin, v, memo);
       v.calendarReady = !!deps.calendar;
@@ -122,10 +132,14 @@ async function view(deps, auth, q) {
           const vol = ctx.vols.find(y => y.kakaoId === x.kakaoId);
           return { kakaoId: x.kakaoId, nickname: x.nickname || '', volName: vol ? vol.name : '', admin: adminOf(x), lastLogin: x.lastLogin || '', me: x.kakaoId === auth.kakaoId };
         }).sort((a, b) => (b.admin ? 1 : 0) - (a.admin ? 1 : 0) || (a.volName || a.nickname).localeCompare(b.volName || b.nickname, 'ko'));
-        v.push = deps.push
-          ? { publicKey: deps.push.publicKey, devices: Object.values(data.push).filter(s => s.kakaoId === auth.kakaoId).length, remindDay: (deps.config.REMIND || {}).day || 20 }
-          : null;
       }
+      // 관리 탭: 내가 관리하는 공지, 알림 켠 봉사자 수
+      const cats = L.editableCats(ctx, admin);
+      v.noticesAdmin = Object.values(data.notices).filter(n => canEditNotice(admin, cats, n.target))
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).map(noticeView);
+      const mine = ctx.vols.filter(x => admin.all || x.roles.some(r => cats.indexOf(roleCatOf(ctx, r)) >= 0));
+      const pushOn = new Set(Object.values(data.push).map(s => s.kakaoId));
+      v.pushStats = { on: mine.filter(x => x.kakaoId && pushOn.has(x.kakaoId) && prefsOf(data.users[x.kakaoId]).duty).length, total: mine.length };
     }
   }
   return v;
@@ -485,7 +499,7 @@ async function adminAction(deps, auth, action, body) {
     const admin = adminOf(tx.data.users[auth.kakaoId]);
     if (!admin) fail('관리자만 할 수 있어요.', 'forbidden');
     const ctx = ctxOf(tx.data, deps.config);
-    return fn(tx, ctx, admin, body, month) || {};
+    return fn(tx, ctx, admin, Object.assign({}, body, { __by: auth.kakaoId }), month) || {};
   });
   const notes = res.warn ? [res.warn] : [];
   for (const [m, c] of uniq((res.sync || []).map(x => x.join('|'))).map(x => x.split('|'))) {
@@ -502,8 +516,11 @@ async function adminAction(deps, auth, action, body) {
       : { title: '스케줄 확정 해제', body: `${who}님이 ${+month.slice(5)}월 ${cat} 스케줄 확정을 해제했어요.`, url: `/?tab=schedule&month=${month}`, tag: `final-${month}-${cat}` },
     { except: auth.kakaoId });
   }
+  let pushed = null;
+  if (action === 'saveNotice' && res.push) pushed = await pushNotice(deps, res.notice, auth.kakaoId);
   const v = await view(deps, auth, { month });
   if (notes.length) v.notice = notes.join(' ');
+  if (pushed !== null) v.pushed = pushed;
   return v;
 }
 
@@ -519,7 +536,7 @@ async function notify(deps, msg, opt) {
     recent.set(opt.throttleKey, Date.now());
   }
   const data = await deps.store.read();
-  const to = new Set(opt.to || Object.values(data.users).filter(u => u.admin && u.admin.all && u.kakaoId !== opt.except).map(u => u.kakaoId));
+  const to = new Set(opt.to || Object.values(data.users).filter(u => u.admin && u.admin.all && u.kakaoId !== opt.except && prefsOf(u).admin).map(u => u.kakaoId));
   const subs = Object.values(data.push).filter(s => to.has(s.kakaoId));
   if (!subs.length) return 0;
   const payload = JSON.stringify({ title: msg.title, body: msg.body, url: msg.url || '/', tag: msg.tag || '' });
@@ -542,7 +559,31 @@ async function notifySafe(deps, msg, opt) {
 function needSuper(data, auth) {
   needLogin(auth);
   const u = data.users[auth.kakaoId];
-  if (!u || !u.admin || !u.admin.all) fail('알림은 전체 관리자만 받을 수 있어요.', 'forbidden');
+  if (!u || !u.admin || !u.admin.all) fail('전체 관리자만 할 수 있어요.', 'forbidden');
+}
+// 알림은 이름을 연결한 봉사자와 관리자가 받을 수 있어요.
+function needPushable(data, auth) {
+  needLogin(auth);
+  const u = data.users[auth.kakaoId];
+  const linked = Object.values(data.vols).some(v => v.kakaoId === auth.kakaoId);
+  if (!linked && !adminOf(u)) fail('봉사자 이름을 먼저 연결해야 알림을 받을 수 있어요.', 'forbidden');
+}
+// 받을 알림 종류 (기본은 모두 켬): duty 봉사 전날, notice 공지, admin 관리자 소식(전체 관리자)
+function prefsOf(u) {
+  const p = (u && u.notify) || {};
+  return { duty: p.duty !== false, notice: p.notice !== false, admin: p.admin !== false };
+}
+async function pushPrefs(deps, auth, body) {
+  needLogin(auth);
+  const b = body.prefs || {};
+  await deps.store.transact(tx => {
+    const u = tx.data.users[auth.kakaoId];
+    if (!u) fail('다시 로그인해 주세요.', 'login_required');
+    const cur = prefsOf(u);
+    ['duty', 'notice', 'admin'].forEach(k => { if (typeof b[k] === 'boolean') cur[k] = b[k]; });
+    tx.putUser(Object.assign({}, u, { notify: cur }));
+  });
+  return view(deps, auth, { month: body.month });
 }
 
 async function pushSubscribe(deps, auth, body) {
@@ -554,7 +595,7 @@ async function pushSubscribe(deps, auth, body) {
       keys.p256dh.length > 200 || keys.auth.length > 100) fail('알림 등록 정보가 올바르지 않아요. 다시 시도해 주세요.');
   const id = P.subId(s.endpoint);
   await deps.store.transact(tx => {
-    needSuper(tx.data, auth);
+    needPushable(tx.data, auth);
     // 한 사람당 기기 10대까지 (오래된 것부터 정리)
     const mine = Object.values(tx.data.push).filter(x => x.kakaoId === auth.kakaoId && x.id !== id)
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
@@ -577,7 +618,7 @@ async function pushUnsubscribe(deps, auth, body) {
 
 async function pushTest(deps, auth, body) {
   const data = await deps.store.read();
-  needSuper(data, auth);
+  needPushable(data, auth);
   if (!deps.push) fail('푸시 알림이 아직 설정되지 않았어요.');
   if (!Object.values(data.push).some(s => s.kakaoId === auth.kakaoId)) fail('이 계정으로 알림을 켠 기기가 없어요. 먼저 알림 받기를 눌러 주세요.');
   const sent = await notify(deps, { title: '시험 알림', body: '알림이 잘 도착했어요. 봉사 일정 소식을 이렇게 알려 드릴게요.', url: '/?tab=settings', tag: 'test' }, { to: [auth.kakaoId] });
@@ -599,6 +640,109 @@ async function remindMissing(deps, now) {
   const list = missing.length > 12 ? missing.slice(0, 12).join(', ') + ` 외 ${missing.length - 12}명` : missing.join(', ');
   const sent = await notifySafe(deps, { title: `${+month.slice(5)}월 일정 미입력 ${missing.length}명`, body: list, url: `/?tab=settings&month=${month}`, tag: 'remind-' + month });
   return { month, missing, sent };
+}
+
+// 매일 저녁: 내일 봉사가 있는 사람에게 알립니다. 확정된 팀의 배정만 봅니다.
+async function remindDuty(deps, now) {
+  const seoul = new Date((now || new Date()).getTime() + 9 * 3600 * 1000);
+  const tomorrow = new Date(Date.UTC(seoul.getUTCFullYear(), seoul.getUTCMonth(), seoul.getUTCDate() + 1)).toISOString().slice(0, 10);
+  const month = tomorrow.slice(0, 7);
+  const data = await deps.store.read();
+  const ctx = ctxOf(data, deps.config);
+  const slots = L.buildSchedule(ctx, month);
+  const duties = {}; // 봉사자 id → ['1부 음향 11:00', ...]
+  L.occasions(ctx, month).filter(o => o.d === tomorrow).forEach(o => {
+    o.roles.forEach(r => {
+      if (!ctx.confirmed[month + '|' + r.cat]) return;
+      const ps = ((slots[o.d] || {})[o.s] || {})[r.name] || [];
+      const where = o.sunday ? o.label : [o.evName, o.label].filter(Boolean).join(' ');
+      ps.forEach(p => { (duties[p.id] = duties[p.id] || []).push(`${where} ${r.name}${o.start ? ' · ' + o.start : ''}`); });
+    });
+  });
+  const [, mm, dd] = tomorrow.split('-');
+  const day = '일월화수목금토'[new Date(tomorrow + 'T00:00:00Z').getUTCDay()];
+  let people = 0, sent = 0;
+  for (const id of Object.keys(duties)) {
+    const v = data.vols[id];
+    if (!v || !v.kakaoId || !prefsOf(data.users[v.kakaoId]).duty) continue;
+    people++;
+    sent += await notifySafe(deps, {
+      title: `내일 봉사 안내 · ${+mm}월 ${+dd}일(${day})`,
+      body: `${v.name}님, 내일 ${duties[id].join(', ')} 봉사가 있어요.`,
+      url: `/?tab=schedule&month=${month}`, tag: 'duty-' + tomorrow,
+    }, { to: [v.kakaoId] });
+  }
+  return { date: tomorrow, assigned: Object.keys(duties).length, people, sent };
+}
+
+/* ---------- 공지 ---------- */
+const NOTICE_ALL = 'all';
+const roleCatOf = (ctx, r) => (ctx.roles.find(x => x.name === r) || {}).cat;
+const todaySeoul = () => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+const canEditNotice = (admin, cats, target) => !!admin && (admin.all || (target !== NOTICE_ALL && cats.indexOf(target) >= 0));
+function noticeView(n) {
+  return { id: n.id, title: n.title, body: n.body, target: n.target, pinned: !!n.pinned, until: n.until || '',
+    authorName: n.authorName || '', createdAt: n.createdAt || '', updatedAt: n.updatedAt || '', expired: !!(n.until && n.until < todaySeoul()) };
+}
+// 이 사람이 볼 수 있는 공지: 전체 공지, 내가 속한 팀(역할) 또는 관리하는 팀의 공지. 기간 지난 공지는 빼요.
+function noticeTeams(data, ctx, kakaoId, admin) {
+  if (admin && admin.all) return null; // 모든 팀
+  const vol = ctx.vols.find(x => x.kakaoId === kakaoId);
+  const set = new Set(admin ? admin.cats : []);
+  if (vol) vol.roles.forEach(r => { const c = roleCatOf(ctx, r); if (c) set.add(c); });
+  return set;
+}
+function visibleNotices(data, ctx, kakaoId, admin) {
+  const teams = noticeTeams(data, ctx, kakaoId, admin);
+  const today = todaySeoul();
+  return Object.values(data.notices)
+    .filter(n => !(n.until && n.until < today) && (n.target === NOTICE_ALL || !teams || teams.has(n.target)))
+    .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || String(b.createdAt).localeCompare(String(a.createdAt)))
+    .slice(0, 30);
+}
+
+ADMIN.saveNotice = (tx, ctx, admin, b, month) => {
+  const n = b.notice || {};
+  const cats = L.editableCats(ctx, admin);
+  const target = String(n.target || '');
+  if (target !== NOTICE_ALL && L.catNames(ctx).indexOf(target) < 0) fail('공지 대상을 골라 주세요.');
+  if (!canEditNotice(admin, cats, target)) fail(target === NOTICE_ALL ? '전체 공지는 전체 관리자만 쓸 수 있어요.' : '내가 맡은 팀에만 공지할 수 있어요.', 'forbidden');
+  const title = L.plain(String(n.title || '')).trim().slice(0, 60);
+  const body = String(n.body || '').replace(/\r\n?/g, '\n').trim().slice(0, 1000);
+  if (!title) fail('공지 제목을 입력해 주세요.');
+  const until = String(n.until || '');
+  if (until && !/^\d{4}-\d{2}-\d{2}$/.test(until)) fail('게시 종료일이 올바르지 않아요.');
+  const cur = n.id ? tx.data.notices[String(n.id)] : null;
+  if (n.id && !cur) fail('공지를 찾을 수 없어요. 새로고침해 주세요.', 'not_found');
+  if (cur && !canEditNotice(admin, cats, cur.target)) fail('이 공지는 고칠 수 없어요.', 'forbidden');
+  const author = Object.values(tx.data.vols).find(v => v.kakaoId === b.__by);
+  const doc = Object.assign({}, cur || { id: newId(8).toLowerCase(), createdAt: nowIso(), authorId: b.__by,
+    authorName: (author && author.name) || ((tx.data.users[b.__by] || {}).nickname) || '관리자' },
+  { title, body, target, pinned: !!n.pinned, until, updatedAt: nowIso() });
+  tx.putNotice(doc);
+  return { notice: doc, isNew: !cur, push: n.push !== false && !cur ? true : !!n.push };
+};
+
+ADMIN.deleteNotice = (tx, ctx, admin, b) => {
+  const cur = tx.data.notices[String(b.id || '')];
+  if (!cur) fail('공지를 찾을 수 없어요. 새로고침해 주세요.', 'not_found');
+  if (!canEditNotice(admin, L.editableCats(ctx, admin), cur.target)) fail('이 공지는 지울 수 없어요.', 'forbidden');
+  tx.delNotice(cur.id);
+};
+
+// 새 공지를 볼 수 있는 사람 중 공지 알림을 켠 사람에게 보냅니다 (쓴 사람 제외).
+async function pushNotice(deps, notice, except) {
+  const data = await deps.store.read();
+  const ctx = ctxOf(data, deps.config);
+  const ids = new Set(Object.values(data.push).map(s => s.kakaoId));
+  const to = Array.from(ids).filter(k => k !== except && prefsOf(data.users[k]).notice).filter(k => {
+    if (notice.target === NOTICE_ALL) return true;
+    const teams = noticeTeams(data, ctx, k, adminOf(data.users[k]));
+    return !teams || teams.has(notice.target);
+  });
+  if (!to.length) return 0;
+  const body = notice.body ? notice.body.replace(/\s+/g, ' ').slice(0, 120) : '';
+  return notifySafe(deps, { title: `${notice.target === NOTICE_ALL ? '공지' : notice.target + ' 공지'} · ${notice.title}`, body, url: '/?notice=' + notice.id, tag: 'notice-' + notice.id }, { to });
 }
 
 /* ---------- 구글 캘린더 ---------- */
@@ -644,4 +788,4 @@ async function syncCalendarSafe(deps, month, cat) {
   catch (e) { return `스케줄은 저장됐지만 구글 캘린더에 반영하지 못했어요: ${e.message}`; }
 }
 
-module.exports = { ctxOf, migrate, view, recordLogin, linkMine, saveMine, setup, adminAction, syncCalendar, notify, pushSubscribe, pushUnsubscribe, pushTest, remindMissing, ADMIN };
+module.exports = { ctxOf, migrate, view, recordLogin, linkMine, saveMine, setup, adminAction, syncCalendar, notify, pushSubscribe, pushUnsubscribe, pushTest, pushPrefs, remindMissing, remindDuty, ADMIN };

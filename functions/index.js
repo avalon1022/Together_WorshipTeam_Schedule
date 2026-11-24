@@ -82,6 +82,15 @@ exports.api = onRequest(
   },
 );
 
+// 봉사 전날 알림: 매일 config.DUTY_REMIND 시각(서울)에 실행
+exports.remindDuty = onSchedule(
+  { schedule: `0 ${config.DUTY_REMIND.hour} * * *`, timeZone: 'Asia/Seoul', region: config.REGION, secrets: [VAPID_PRIVATE_KEY], memory: '256MiB' },
+  async () => {
+    const r = await S.remindDuty({ store, config, push: getPush() });
+    console.log('봉사 전날 알림', r.date, '배정 ' + r.assigned + '명', '알림 대상 ' + r.people + '명', r.sent + '대 발송');
+  },
+);
+
 // 미입력자 알림: 매달 config.REMIND 날짜·시각(서울)에 실행
 exports.remindMissing = onSchedule(
   { schedule: `0 ${config.REMIND.hour} ${config.REMIND.day} * *`, timeZone: 'Asia/Seoul', region: config.REGION, secrets: [VAPID_PRIVATE_KEY], memory: '256MiB' },
