@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>주일 예배팀 스케줄</title>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" type="image/png" href="/icons/favicon.png">
-<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="/icons/favicon.png?v=2">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=2">
 <meta name="theme-color" content="#3D576A">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -162,6 +162,14 @@ select.small{width:auto;padding:5px 8px;font-size:13px}
 .badge.new{color:var(--accent);border-color:var(--accent)}
 .prefs{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
 textarea.nbody{width:100%;min-height:96px;resize:vertical;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:inherit}
+.guide{position:fixed;inset:0;z-index:50;background:rgba(15,23,30,.55);display:flex;align-items:flex-end;justify-content:center;padding:16px}
+@media (min-width:640px){.guide{align-items:center}}
+.guide .sheet{background:var(--surface);color:inherit;border-radius:16px;max-width:480px;width:100%;max-height:88vh;overflow:auto;padding:20px 18px 18px;box-shadow:0 10px 40px rgba(0,0,0,.25)}
+.guide h3{margin:0 0 4px;font-size:18px}
+.guide ol{margin:12px 0 0;padding-left:22px;display:flex;flex-direction:column;gap:10px;font-size:15px;line-height:1.5}
+.guide .ico{display:inline-flex;vertical-align:-4px;width:22px;height:22px;border:1px solid var(--line);border-radius:6px;align-items:center;justify-content:center;margin:0 2px}
+.guide .ico svg{width:15px;height:15px}
+.guide .why{background:var(--bg);border-radius:10px;padding:10px 12px;font-size:13px;margin-top:10px}
 .install{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 0 16px}
 .install img{width:40px;height:40px;border-radius:10px;flex:none}
 .install .txt{flex:1;min-width:180px;font-size:14px}
@@ -272,7 +280,7 @@ async function load(quiet){
   if(quiet&&(state.editCell||(a&&a.matches("input,select"))))return;
   render();
 }
-function setView(v){state.view=v;state.volDraft={};
+function setView(v){state.view=v;markApp();state.volDraft={};
   if(state.filter!=="전체"&&!v.cats.some(c=>c.name===state.filter))state.filter="전체";
   if(state.proxyId){if(v.admin)loadProxyForm();else{state.proxyId="";state.formOwner="?"}}
   // 내 정보가 처음 오거나 바뀌면 입력 칸을 그 내용으로 채웁니다.
@@ -726,10 +734,10 @@ async function pushOff(){
 
 // 관리 탭 봉사자 목록: 한 사람당 한 줄로 접어 두고, 누르면 펼쳐서 수정합니다.
 const volInCat=(v,c)=>v.roles.some(r=>roleCat(r)===c);
-const volFilterDefs=cats=>[["all","전체",()=>true],...cats.map(c=>[c,c,v=>volInCat(v,c)]),["none","역할 없음",v=>!cats.some(c=>volInCat(v,c))],["unlinked","카카오 미연결",v=>!v.linked]];
+const volFilterDefs=cats=>[["all","전체",()=>true],...cats.map(c=>[c,c,v=>volInCat(v,c)]),["none","역할 없음",v=>!cats.some(c=>volInCat(v,c))],["unlinked","카카오 미연결",v=>!v.linked],["noapp","앱 미설치",v=>v.linked&&!v.app]];
 function volFilterChips(vols,cats){
   return volFilterDefs(cats).map(([k,l,f])=>{const n=vols.filter(f).length;
-    return (k==="none"||k==="unlinked")&&!n&&state.volFilter!==k?"":`<button class="chip" data-vfilter="${esc(k)}" aria-pressed="${state.volFilter===k}">${esc(l)} ${n}</button>`}).join("");
+    return (k==="none"||k==="unlinked"||k==="noapp")&&!n&&state.volFilter!==k?"":`<button class="chip" data-vfilter="${esc(k)}" aria-pressed="${state.volFilter===k}">${esc(l)} ${n}</button>`}).join("");
 }
 function volVisible(vols,cats){
   const def=volFilterDefs(cats).find(d=>d[0]===state.volFilter)||volFilterDefs(cats)[0];
@@ -799,8 +807,8 @@ function renderSettings(){
   ${toastHtml()}
   <div class="grid2" style="margin-top:12px">
     <section class="panel">
-      <div class="row" style="justify-content:space-between"><h2 style="margin:0">봉사자 ${V().vols.length}명${V().pushStats&&V().push?` <span class="meta" style="font-weight:400">· 알림 켠 봉사자 ${V().pushStats.on}/${V().pushStats.total}명</span>`:""}</h2>
-        <button class="btn ${state.newVolOpen?"ghost":""} small" id="nvToggle">${state.newVolOpen?"등록 닫기":"+ 봉사자 등록"}</button></div>
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">봉사자 ${V().vols.length}명${V().pushStats?` <span class="meta" style="font-weight:400">· 앱 설치 ${V().pushStats.app}/${V().pushStats.total} · 알림 ${V().pushStats.on}/${V().pushStats.total}</span>`:""}</h2>
+        <div class="row"><button class="btn ghost small" id="copyGuide">앱 설치 안내문 복사</button><button class="btn ${state.newVolOpen?"ghost":""} small" id="nvToggle">${state.newVolOpen?"등록 닫기":"+ 봉사자 등록"}</button></div></div>
       ${state.newVolOpen?`<div class="newvol" style="margin-top:12px">
         <span class="label">봉사자 미리 등록</span>
         <input type="text" id="nvName" maxlength="20" placeholder="이름" value="${esc(nv.name)}">
@@ -950,6 +958,17 @@ document.addEventListener("click",async e=>{
     state.busy=false;state.noticeDraft=null;setView(v);render();
     return flash(v.pushed===undefined?"공지를 저장했어요.":v.pushed?`공지를 올렸어요. ${v.pushed}대 기기에 알림을 보냈어요.`:"공지를 올렸어요. 아직 알림을 켠 사람이 없어서 알림은 가지 않았어요.",false,"nt")}
   if(t.id==="copyNext")return copyText(true);
+  if(t.id==="copyGuide"){const text=`📱 예배팀 스케줄 앱 설치 안내
+
+아래 링크를 열고 안내에 따라 홈 화면에 추가해 주세요.
+설치하면 봉사 전날 알림과 공지를 받을 수 있어요.
+${location.origin}/?install=1
+
+· 아이폰: Safari에서 공유 버튼(□↑) → 홈 화면에 추가
+· 안드로이드: Chrome 메뉴(⋮) → 앱 설치(홈 화면에 추가)
+· 설치한 앱에서 카카오 로그인 → ‘알림 받기’를 눌러 주세요.`;
+    try{await navigator.clipboard.writeText(text);flash("안내문을 복사했어요. 단톡방에 붙여넣으세요.",false,"vol")}
+    catch(err){flash("복사하지 못했어요. 주소: "+location.origin+"/?install=1",true,"vol")}return}
   if(t.id==="nvToggle"){state.newVolOpen=!state.newVolOpen;return render()}
   if(t.dataset.vopen!==undefined){const id=t.dataset.vopen;state.volOpen=state.volOpen===id?"":id;state.confirmDel=state.confirmUnlink=null;return render()}
   if(t.dataset.vfilter){state.volFilter=t.dataset.vfilter;return render()}
@@ -1070,31 +1089,94 @@ async function copyText(next){
 render();
 load(false);
 
-/* ---------- 홈 화면 앱(PWA) ---------- */
-(function(){
-  if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}));
-  const standalone=window.matchMedia("(display-mode: standalone)").matches||navigator.standalone===true;
-  if(standalone)return;
-  const KEY="installHideUntil";
-  try{if(Date.now()<+(localStorage.getItem(KEY)||0))return}catch(e){}
+/* ---------- 홈 화면 앱(PWA) 설치 안내 ---------- */
+const PWA=(()=>{
   const ua=navigator.userAgent;
   const ios=/iPhone|iPad|iPod/.test(ua)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
-  const iosSafari=ios&&/Safari/.test(ua)&&!/CriOS|FxiOS|EdgiOS|KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line/i.test(ua);
-  const inApp=/KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line/i.test(ua);
-  let deferred=null;
+  const android=/Android/i.test(ua);
+  const kakao=/KAKAOTALK/i.test(ua);
+  const inApp=/KAKAOTALK|NAVER|Instagram|FBAN|FBAV|\bLine\/|DaumApps|BAND|everytimeApp/i.test(ua);
+  const standalone=window.matchMedia("(display-mode: standalone)").matches||navigator.standalone===true;
+  return {ios,android,kakao,inApp,standalone,mobile:ios||android,deferred:null};
+})();
+const ls={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
+// 홈 화면 앱으로 열었으면 하루에 한 번 서버에 알립니다 (관리자가 설치 인원을 볼 수 있도록)
+function markApp(){
+  if(!PWA.standalone||!state.view||!state.view.me)return;
+  const today=new Date().toISOString().slice(0,10);
+  if(ls.get("appMark")===today)return;ls.set("appMark",today);
+  api("/api/mine/app",{}).catch(()=>{});
+}
+// 외부 브라우저로 열기: 카카오톡은 전용 주소, 안드로이드 다른 앱은 Chrome으로
+function openExternalUrl(){
+  const url=location.origin+"/?install=1";
+  if(PWA.kakao)return "kakaotalk://web/openExternal?url="+encodeURIComponent(url);
+  if(PWA.android)return `intent://${location.host}/?install=1#Intent;scheme=https;package=com.android.chrome;end`;
+  return "";
+}
+const SVG_SHARE=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 11v9h14v-9"/></svg>`;
+const SVG_ADD=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/></svg>`;
+const SVG_DOTS=`<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
+const SVG_KEBAB=`<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>`;
+function guideHtml(){
+  const ext=openExternalUrl();
+  let steps;
+  if(PWA.inApp)steps=`<p>지금은 ${PWA.kakao?"카카오톡":"앱"} 안의 브라우저라 홈 화면에 추가할 수 없어요. ${PWA.ios?"Safari":"Chrome"}에서 열어 주세요.</p>
+    ${ext?`<div class="row" style="margin-top:12px"><a class="btn" href="${ext}">${PWA.ios?"Safari":"Chrome"}에서 열기</a></div>`
+      :`<ol><li>오른쪽 위(또는 아래) <span class="ico">${SVG_DOTS}</span> 메뉴를 눌러요.</li><li><b>Safari로 열기</b>(또는 ‘다른 브라우저로 열기’)를 눌러요.</li><li>열린 화면에서 이 안내를 다시 따라 해 주세요.</li></ol>`}`;
+  else if(PWA.ios)steps=`<ol>
+      <li>Safari 아래쪽(또는 위쪽)의 <b>공유 버튼</b> <span class="ico">${SVG_SHARE}</span>을 눌러요. 안 보이면 <span class="ico">${SVG_DOTS}</span> 버튼을 먼저 누르고 <b>공유</b>를 골라요.</li>
+      <li>메뉴를 위로 밀어 <b>홈 화면에 추가</b> <span class="ico">${SVG_ADD}</span>를 눌러요.</li>
+      <li>‘웹 앱으로 열기’가 켜져 있으면 그대로 두고, 오른쪽 위 <b>추가</b>를 눌러요.</li>
+      <li>홈 화면의 <b>예배팀 스케줄</b> 아이콘으로 열고, 카카오 로그인 → 입력 탭 아래 <b>알림 받기</b>를 눌러요.</li></ol>`;
+  else if(PWA.android)steps=`<ol>
+      <li>${PWA.deferred?`아래 <b>지금 설치</b>를 누르거나, `:""}Chrome 오른쪽 위 <span class="ico">${SVG_KEBAB}</span> 메뉴에서 <b>앱 설치</b> 또는 <b>홈 화면에 추가</b>를 눌러요.</li>
+      <li><b>설치</b>를 눌러요.</li>
+      <li>홈 화면의 <b>예배팀 스케줄</b> 아이콘으로 열고, 카카오 로그인 → 입력 탭 아래 <b>알림 받기</b>를 눌러요.</li></ol>
+      ${PWA.deferred?`<div class="row" style="margin-top:12px"><button class="btn" id="installGo">지금 설치</button></div>`:""}`;
+  else steps=`<p>휴대폰에서 이 주소를 열면 홈 화면에 앱으로 추가할 수 있어요.</p><p class="meta" style="word-break:break-all">${esc(location.origin)}</p>
+      ${PWA.deferred?`<div class="row" style="margin-top:12px"><button class="btn" id="installGo">이 컴퓨터에 설치</button></div>`:""}`;
+  return `<div class="guide" id="guide" role="dialog" aria-modal="true" aria-labelledby="guideTitle"><div class="sheet">
+    <div class="row" style="justify-content:space-between;align-items:center"><h3 id="guideTitle">홈 화면에 앱 설치하기</h3><button class="icon-btn" id="guideClose" aria-label="닫기">×</button></div>
+    <div class="why">설치하면 주소를 찾지 않고 아이콘으로 바로 열리고, <b>봉사 전날 알림</b>과 <b>새 공지</b>를 받을 수 있어요.</div>
+    ${steps}
+  </div></div>`;
+}
+function openGuide(){closeGuide();document.body.insertAdjacentHTML("beforeend",guideHtml())}
+function closeGuide(){const g=$("#guide");if(g)g.remove()}
+document.addEventListener("click",async e=>{
+  const t=e.target.closest("button,a");if(!t)return;
+  if(t.id==="guideClose"||e.target.id==="guide"){closeGuide();return}
+  if(t.id==="installGuide"){openGuide();return}
+  if(t.id==="installHide"){ls.set("installHideUntil",String(Date.now()+3*86400000));$("#install").innerHTML="";return}
+  if(t.id==="installGo"&&PWA.deferred){PWA.deferred.prompt();try{await PWA.deferred.userChoice}catch(err){}PWA.deferred=null;closeGuide();$("#install").innerHTML=""}
+});
+(function(){
+  if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}));
+  const p=new URLSearchParams(location.search),fromLink=p.has("install");
+  if(fromLink)try{history.replaceState(null,"",location.pathname+location.hash)}catch(e){}
+  if(PWA.standalone)return;
+  // 카카오톡 안에서 열면 한 번은 자동으로 기본 브라우저로 넘깁니다.
+  if(PWA.kakao){let done=false;try{done=sessionStorage.getItem("kakaoOut")==="1";sessionStorage.setItem("kakaoOut","1")}catch(e){}
+    if(!done){location.href=openExternalUrl()}}
   const box=$("#install");
-  function show(html){box.innerHTML=`<div class="install"><img src="/icons/icon-192.png" alt=""><div class="txt">${html}</div>
-    ${deferred?`<button class="btn small" id="installGo">설치</button>`:""}<button class="btn ghost small" id="installHide">닫기</button></div>`}
-  box.addEventListener("click",async e=>{
-    const t=e.target.closest("button");if(!t)return;
-    if(t.id==="installHide"){try{localStorage.setItem(KEY,String(Date.now()+30*86400000))}catch(err){}box.innerHTML=""}
-    if(t.id==="installGo"&&deferred){deferred.prompt();try{await deferred.userChoice}catch(err){}deferred=null;box.innerHTML=""}
-  });
-  window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferred=e;
-    show(`<b>홈 화면에 앱으로 추가하기</b><span>설치하면 주소 입력 없이 아이콘으로 바로 열 수 있어요.</span>`)});
-  window.addEventListener("appinstalled",()=>{box.innerHTML=""});
-  if(iosSafari)show(`<b>홈 화면에 앱으로 추가하기</b><span>아래 <b style="display:inline">공유 버튼(□↑)</b> → <b style="display:inline">홈 화면에 추가</b>를 누르면 앱처럼 쓸 수 있어요.</span>`);
-  else if(inApp)show(`<b>앱으로 쓰려면 브라우저에서 열어 주세요</b><span>오른쪽 위(또는 아래) 메뉴에서 ‘다른 브라우저로 열기’를 누른 뒤 홈 화면에 추가하세요.</span>`);
+  function show(){
+    if(!PWA.mobile&&!PWA.deferred)return;
+    if(Date.now()<+(ls.get("installHideUntil")||0))return;
+    box.innerHTML=`<div class="install"><img src="/icons/icon-192.png?v=2" alt=""><div class="txt">
+      <b>${PWA.inApp?"브라우저에서 열어 앱으로 설치해 주세요":"홈 화면에 앱으로 설치해 주세요"}</b>
+      <span>설치하면 봉사 전날 알림과 새 공지를 받을 수 있어요.</span></div>
+      <div class="row" style="margin-left:auto"><button class="btn small" id="installGuide">설치 방법</button><button class="btn ghost small" id="installHide">나중에</button></div></div>`;
+  }
+  window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();PWA.deferred=e;show()});
+  window.addEventListener("appinstalled",()=>{box.innerHTML="";closeGuide()});
+  show();
+  // 안내 링크로 들어왔거나, 휴대폰에서 처음 로그인했을 때 설치 방법을 한 번 띄워요.
+  if(fromLink)openGuide();
+  else if(PWA.mobile&&state.tab==="input"&&!ls.get("guideShown")&&new URLSearchParams(location.search).size===0){
+    const iv=setInterval(()=>{if(state.view){clearInterval(iv);if(state.view.me){ls.set("guideShown","1");openGuide()}}},500);
+    setTimeout(()=>clearInterval(iv),15000);
+  }
 })();
 setInterval(()=>{if(!document.hidden&&state.tab==="schedule"&&!state.busy)load(true)},60000);
 </script>

@@ -139,7 +139,11 @@ async function view(deps, auth, q) {
         .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).map(noticeView);
       const mine = ctx.vols.filter(x => admin.all || x.roles.some(r => cats.indexOf(roleCatOf(ctx, r)) >= 0));
       const pushOn = new Set(Object.values(data.push).map(s => s.kakaoId));
-      v.pushStats = { on: mine.filter(x => x.kakaoId && pushOn.has(x.kakaoId) && prefsOf(data.users[x.kakaoId]).duty).length, total: mine.length };
+      const hasApp = x => !!(x.kakaoId && data.users[x.kakaoId] && data.users[x.kakaoId].appAt);
+      v.pushStats = { on: mine.filter(x => x.kakaoId && pushOn.has(x.kakaoId) && prefsOf(data.users[x.kakaoId]).duty).length, app: mine.filter(hasApp).length, total: mine.length };
+      // 봉사자별 홈 화면 앱 사용 여부 (관리자에게만)
+      const appIds = new Set(ctx.vols.filter(hasApp).map(x => x.id));
+      (v.vols || []).forEach(x => { x.app = appIds.has(x.id); });
     }
   }
   return v;
@@ -157,6 +161,17 @@ async function recordLogin(deps, kakaoId, nickname) {
 function needLogin(auth) { if (!auth) fail('로그인이 필요해요. 카카오로 다시 로그인해 주세요.', 'login_required'); }
 
 // 처음 로그인한 사람이 목록에 있는 자기 이름과 카카오 계정을 연결합니다.
+// 홈 화면 앱으로 열었다는 표시 (하루에 한 번만 저장)
+async function markApp(deps, auth) {
+  needLogin(auth);
+  const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  await deps.store.transact(tx => {
+    const u = tx.data.users[auth.kakaoId];
+    if (u && u.appAt !== today) tx.putUser(Object.assign({}, u, { appAt: today }));
+  });
+  return { ok: true };
+}
+
 async function linkMine(deps, auth, body) {
   needLogin(auth);
   const linked = await deps.store.transact(tx => {
@@ -788,4 +803,4 @@ async function syncCalendarSafe(deps, month, cat) {
   catch (e) { return `스케줄은 저장됐지만 구글 캘린더에 반영하지 못했어요: ${e.message}`; }
 }
 
-module.exports = { ctxOf, migrate, view, recordLogin, linkMine, saveMine, setup, adminAction, syncCalendar, notify, pushSubscribe, pushUnsubscribe, pushTest, pushPrefs, remindMissing, remindDuty, ADMIN };
+module.exports = { ctxOf, migrate, view, recordLogin, markApp, linkMine, saveMine, setup, adminAction, syncCalendar, notify, pushSubscribe, pushUnsubscribe, pushTest, pushPrefs, remindMissing, remindDuty, ADMIN };

@@ -89,6 +89,7 @@ async function handle(env, req, res) {
     if (path === '/api/logout') return send(res, 200, { ok: true }, { 'Set-Cookie': A.clearCookie(secure) });
     if (path === '/api/mine/save') return send(res, 200, await S.saveMine(deps, auth, body));
     if (path === '/api/mine/link') return send(res, 200, await S.linkMine(deps, auth, body));
+    if (path === '/api/mine/app') return send(res, 200, await S.markApp(deps, auth));
     if (path === '/api/setup') return send(res, 200, await S.setup(deps, auth, body));
     if (path === '/api/push/subscribe') return send(res, 200, await S.pushSubscribe(deps, auth, body));
     if (path === '/api/push/unsubscribe') return send(res, 200, await S.pushUnsubscribe(deps, auth, body));

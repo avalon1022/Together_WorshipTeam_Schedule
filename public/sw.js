@@ -4,7 +4,7 @@
  * - /api/, /auth/ 요청(로그인·데이터)은 건드리지 않습니다.
  * - 관리자 푸시 알림을 받아서 보여 주고, 누르면 해당 화면을 엽니다.
  */
-const CACHE = 'shell-v2';
+const CACHE = 'shell-v3';
 const SHELL = ['/', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/favicon.png'];
 
 self.addEventListener('install', e => {

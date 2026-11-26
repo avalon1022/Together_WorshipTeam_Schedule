@@ -492,5 +492,25 @@ const L = require('../functions/src/logic');
     ok(rd.assigned === 0 && rd.sent === 0, 'no duty on Monday');
   }
 
+  /* ---------- 홈 화면 앱 설치 표시 ---------- */
+  {
+    const S11 = makeServer({ kakaoUsers });
+    const su = await S11.login('c1'), va = await S11.login('c4'), vb = await S11.login('c5');
+    const post = (who, path, body) => S11.call('POST', path, { cookie: who.cookie, body: Object.assign({ month: M }, body) });
+    await post(su, '/api/setup', { code: 'SETUP-123' });
+    await post(va, '/api/mine/save', { name: '앱씀', roles: ['음향'], dates: [], touched: [M] });
+    await post(vb, '/api/mine/save', { name: '앱안씀', roles: ['인도'], dates: [], touched: [M] });
+    let r = await S11.call('POST', '/api/mine/app', { body: {} });
+    ok(r.status === 401, 'app mark needs login');
+    r = await post(va, '/api/mine/app', {});
+    const v0 = S11.adapter.v;
+    await post(va, '/api/mine/app', {});
+    ok(r.status === 200 && S11.adapter.v === v0, 'app mark once per day');
+    const sv = (await S11.call('GET', '/api/view?month=' + M, { cookie: su.cookie })).json;
+    ok(sv.pushStats.app === 1 && sv.pushStats.total === 2 && sv.vols.find(x => x.name === '앱씀').app === true && sv.vols.find(x => x.name === '앱안씀').app === false, 'admin sees who installed the app');
+    const pv = (await S11.call('GET', '/api/view?month=' + M, { cookie: vb.cookie })).json;
+    ok(pv.vols.every(x => x.app === undefined), 'install info hidden from volunteers');
+  }
+
   summary();
 })().catch(e => { console.error(e); process.exitCode = 1; });
