@@ -5,7 +5,7 @@
  * meta/state 문서의 v(버전)가 같으면 다시 읽지 않아서 읽기 횟수를 크게 줄입니다.
  *
  * Firestore 구조
- *   config/main          { roles: [{ cat, name, count }] }
+ *   config/main          { roles: [{ cat, name, count }], pairs: [{ id, a, b, type: 'together' | 'apart' }] }
  *   volunteers/{id}      { name, roles, dates, lockedCats, svcLock, kakaoId, updatedAt }
  *   events/{id}          { name, date, teams, slots, updatedAt }
  *   months/{YYYY-MM}     { overrides, finals: { 팀: slots } }
@@ -19,7 +19,7 @@
 
 const COLS = { volunteers: 'vols', events: 'events', months: 'months', users: 'users', calendar: 'calendar', push: 'push', notices: 'notices' };
 
-const emptyData = () => ({ roles: [], vols: {}, events: {}, months: {}, users: {}, calendar: {}, push: {}, notices: {} });
+const emptyData = () => ({ roles: [], pairs: [], vols: {}, events: {}, months: {}, users: {}, calendar: {}, push: {}, notices: {} });
 const clone = o => JSON.parse(JSON.stringify(o));
 
 // 한 번의 변경 작업. data를 고치면서 바뀐 문서 경로를 기록합니다.
@@ -42,7 +42,8 @@ function makeTx(data) {
     delPush: id => del('push', id),
     putNotice: n => put('notices', n.id, n),
     delNotice: id => del('notices', id),
-    setRoles: roles => { d.roles = roles; dirty['config/main'] = { roles }; },
+    setRoles: roles => { d.roles = roles; dirty['config/main'] = { roles: d.roles, pairs: d.pairs || [] }; },
+    setPairs: pairs => { d.pairs = pairs; dirty['config/main'] = { roles: d.roles, pairs }; },
   };
 }
 
@@ -59,7 +60,7 @@ function fromDocs(docs) {
   Object.keys(docs).forEach(path => {
     const [col, id] = path.split('/');
     const val = docs[path];
-    if (col === 'config' && id === 'main') data.roles = Array.isArray(val.roles) ? val.roles : [];
+    if (col === 'config' && id === 'main') { data.roles = Array.isArray(val.roles) ? val.roles : []; data.pairs = Array.isArray(val.pairs) ? val.pairs : []; }
     else if (col === 'volunteers') data.vols[id] = Object.assign({ id }, val);
     else if (col === 'events') data.events[id] = Object.assign({ id }, val);
     else if (col === 'months') data.months[id] = val;

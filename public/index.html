@@ -254,7 +254,7 @@ const blankNew=()=>({name:"",roles:[],lockedCats:[],svcLock:{},prio:{}});
 const state={month:shiftMonth(monthKeyOf(new Date()),1),view:null,loading:true,error:"",loginMsg:"",formOwner:"",
   tab:"input",form:blankForm(),filter:"전체",editCell:null,volDraft:{},newVol:blankNew(),roleDraft:{},
   toast:"",toastErr:false,toastAt:"",busy:false,confirmDel:null,confirmReset:null,confirmUnlink:null,
-  linkPick:"",newReg:false,proxyId:"",evDraft:null,confirmEvDel:null,adminDraft:{},adminPick:"",volOpen:"",volQuery:"",volFilter:"all",newVolOpen:false,pushLocal:"",pushChecking:false,noticesAll:false,noticeDraft:null,noticeSeen:null};
+  linkPick:"",newReg:false,proxyId:"",evDraft:null,confirmEvDel:null,adminDraft:{},adminPick:"",volOpen:"",volQuery:"",volFilter:"all",newVolOpen:false,pushLocal:"",pushChecking:false,noticesAll:false,noticeDraft:null,noticeSeen:null,pairForm:{}};
 const V=()=>state.view;
 const isAdmin=()=>!!(V()&&V().admin);
 const myCats=()=>isAdmin()?V().admin.cats:[];
@@ -744,6 +744,25 @@ function volVisible(vols,cats){
   const q=state.volQuery.trim().toLowerCase();
   return vols.filter(v=>def[2](v)&&(!q||v.name.toLowerCase().includes(q)));
 }
+// 함께/따로 배정 규칙 (펼친 봉사자 안에서 보고 추가)
+const PAIR_LABEL={together:"같은 날 함께",apart:"같은 날 피하기"};
+const pairsFor=id=>(V().pairs||[]).filter(p=>p.a===id||p.b===id);
+function pairsHtml(v,cats,master){
+  if(!V().pairs)return "";
+  const nameOf=id=>(V().vols.find(x=>x.id===id)||{}).name||"(삭제됨)";
+  const mine=pairsFor(v.id),taken=new Set(mine.map(p=>p.a===v.id?p.b:p.a));
+  const others=V().vols.filter(x=>x.id!==v.id&&!taken.has(x.id)&&(master||x.roles.some(r=>cats.includes(roleCat(r))))).sort((a,b)=>a.name.localeCompare(b.name,"ko"));
+  const f=state.pairForm[v.id]||{other:"",type:"together"};
+  return `<div class="catrow"><b>함께/따로 배정</b><span class="meta">자동 배정에 반영돼요. ‘피하기’는 대신 설 사람이 없을 때만 같은 날 배정될 수 있어요.</span>
+    ${mine.length?`<div class="chips sm">${mine.map(p=>`<span class="chip" aria-pressed="true">${PAIR_LABEL[p.type]} · ${esc(nameOf(p.a===v.id?p.b:p.a))}
+      <button class="icon-btn" style="margin-left:4px" data-pairdel="${esc(p.id)}" aria-label="규칙 삭제">×</button></span>`).join("")}</div>`:""}
+    ${others.length?`<div class="row">
+      <select class="small" data-pairother="${esc(v.id)}" aria-label="함께/따로 정할 사람"><option value="">사람 고르기</option>${others.map(x=>`<option value="${esc(x.id)}" ${f.other===x.id?"selected":""}>${esc(x.name)}</option>`).join("")}</select>
+      <select class="small" data-pairtype="${esc(v.id)}" aria-label="규칙"><option value="together" ${f.type==="together"?"selected":""}>같은 날 함께</option><option value="apart" ${f.type==="apart"?"selected":""}>같은 날 피하기</option></select>
+      <button class="btn ghost small" data-pairadd="${esc(v.id)}">추가</button></div>`:""}
+  </div>`;
+}
+
 function volListHtml(vols,cats,draft,catControls,master){
   if(!vols.length)return `<p class="hint">아직 봉사자가 없어요. ‘+ 봉사자 등록’으로 미리 등록하거나, 봉사자가 카카오로 로그인해 이름을 입력하면 여기에 나타나요.</p>`;
   const list=volVisible(vols,cats);
@@ -757,13 +776,14 @@ function volListHtml(vols,cats,draft,catControls,master){
       <button class="vrow" data-vopen="${esc(v.id)}" aria-expanded="${open}">
         <span class="caret" aria-hidden="true">▶</span><b>${esc(v.name)}</b>
         <span class="vsum">${esc(mine.join("·")||"역할 없음")}</span>
-        ${changed?`<span class="badge">수정 중</span>`:""}${prio.map(p=>`<span class="badge">${p}</span>`).join("")}${v.linked?"":`<span class="badge">미연결</span>`}
+        ${changed?`<span class="badge">수정 중</span>`:""}${prio.map(p=>`<span class="badge">${p}</span>`).join("")}${pairsFor(v.id).length?`<span class="badge">규칙 ${pairsFor(v.id).length}</span>`:""}${v.linked?"":`<span class="badge">미연결</span>`}
         <span class="vcount">가능 ${v.stats.avail}주</span>
       </button>
       ${open?`<div class="vbody">
         <span class="meta">${esc(mLabel(state.month))} 가능 ${v.stats.avail}주 · ${v.linked?"카카오 연결됨":"카카오 미연결"}</span>
         ${others.length?`<span class="meta">다른 팀 역할: ${esc(others.join(", "))}</span>`:""}
         ${cats.map(c=>catControls(dr,v.id,c)).join("")}
+        ${pairsHtml(v,cats,master)}
         <div class="row" style="justify-content:flex-end">
           <button class="btn ghost" data-vsave="${esc(v.id)}">저장</button>
           <button class="btn ghost" data-vproxy="${esc(v.id)}">일정 대신 입력</button>
@@ -958,6 +978,11 @@ document.addEventListener("click",async e=>{
     state.busy=false;state.noticeDraft=null;setView(v);render();
     return flash(v.pushed===undefined?"공지를 저장했어요.":v.pushed?`공지를 올렸어요. ${v.pushed}대 기기에 알림을 보냈어요.`:"공지를 올렸어요. 아직 알림을 켠 사람이 없어서 알림은 가지 않았어요.",false,"nt")}
   if(t.id==="copyNext")return copyText(true);
+  if(t.dataset.pairadd){const id=t.dataset.pairadd,f=state.pairForm[id]||{type:"together"};
+    if(!f.other)return flash("함께/따로 정할 사람을 골라 주세요.",true,"vol");
+    const ok=await run("admin/savePair",{month:M,a:id,b:f.other,type:f.type||"together"},"규칙을 추가했어요. 자동 배정에 바로 반영돼요.","vol");
+    if(ok){delete state.pairForm[id];render()}return}
+  if(t.dataset.pairdel)return run("admin/deletePair",{month:M,id:t.dataset.pairdel},"규칙을 지웠어요.","vol");
   if(t.id==="copyGuide"){const text=`📱 예배팀 스케줄 앱 설치 안내
 
 아래 링크를 열고 안내에 따라 홈 화면에 추가해 주세요.
@@ -1029,6 +1054,8 @@ document.addEventListener("change",e=>{
   if(t.dataset.sunmode){const d=t.dataset.sunmode,v=t.value;
     run("admin/setSunMode",{month:state.month,date:d,mode:v},`${dLabel(d)} 예배를 ${v==="only1"?"1부만으로":v==="only2"?"2부만으로":"평소대로(1부·2부)"} 바꿨어요.`,"sun");return}
   if(t.id==="evReplaces"&&state.evDraft){state.evDraft.replaces=t.checked;return}
+  if(t.dataset.pairother!==undefined){const id=t.dataset.pairother;state.pairForm[id]={...(state.pairForm[id]||{type:"together"}),other:t.value};return}
+  if(t.dataset.pairtype!==undefined){const id=t.dataset.pairtype;state.pairForm[id]={...(state.pairForm[id]||{other:""}),type:t.value};return}
   if(state.noticeDraft){if(t.id==="ntTarget")state.noticeDraft.target=t.value;if(t.id==="ntPinned")state.noticeDraft.pinned=t.checked;
     if(t.id==="ntUntil")state.noticeDraft.until=t.value;if(t.id==="ntPush")state.noticeDraft.push=t.checked}
   if(t.id==="evDate"&&state.evDraft){state.evDraft.date=t.value;if(new Date(t.value+"T00:00:00").getDay()!==0)state.evDraft.replaces=false;return render()}

@@ -5,6 +5,7 @@
  *   cats:      [{ name, bothServices, usePriority }],
  *   roles:     [{ cat, name, count }],
  *   vols:      [{ id, name, roles, dates, lockedCats, svcLock, prio, kakaoId }],
+ *   pairs:     [{ id, a, b, type: 'together' | 'apart' }]  같은 날 함께 배정 / 같은 날 피하기
  *              prio: { 팀: 'high' | 'low' }  관리자 배정 우선순위 (usePriority 팀만, 관리자에게만 보임)
  *   events:    [{ id, name, date, teams, slots: [{ k, label, start, end }] }],
  *   confirmed: { 'YYYY-MM|팀': slots },
@@ -21,6 +22,8 @@ const SERVICES = ['1', '2'];
 // 배정 우선순위: '자주'는 점수를 빼고 '가끔'은 더합니다. 20점이면 이번 달 주일 2회 정도 차이를 뒤집습니다.
 const PRIORITIES = ['high', 'low'];
 const PRIO_WEIGHT = 20;
+// 함께/따로 규칙: 짝이 이미 그날 배정됐으면 '함께'는 크게 당기고, '피하기'는 거의 빼요(대신 설 사람이 없을 때만 배정).
+const PAIR_TOGETHER = 15, PAIR_TOGETHER_HINT = 3, PAIR_APART = 100;
 const usesPrio = (ctx, cat) => !!(ctx.cats.find(c => c.name === cat) || {}).usePriority;
 
 class UserError extends Error {
@@ -165,6 +168,13 @@ function buildSchedule(ctx, key, depth, memo) {
 
   const H = history(ctx, key, depth, roleCat, memo);
   let prev = H.prev;
+  const pairsOf = {};
+  (ctx.pairs || []).forEach(p => {
+    (pairsOf[p.a] = pairsOf[p.a] || []).push({ other: p.b, type: p.type });
+    (pairsOf[p.b] = pairsOf[p.b] || []).push({ other: p.a, type: p.type });
+  });
+  const volById = {};
+  ctx.vols.forEach(v => { volById[v.id] = v; });
   const total = {}, perRole = {}, slots = {};
 
   uniq(occ.map(o => o.d)).forEach(d => {
@@ -174,9 +184,11 @@ function buildSchedule(ctx, key, depth, memo) {
     dayOcc.forEach(o => { slots[d][o.s] = {}; used[o.s] = new Set(); });
     const on = {};
     const servedToday = new Set();
+    const today = new Set(); // 이 날 어디든 배정된 사람 (함께/따로 규칙용)
     const inGroup = {};
     const place = (id, o, r) => {
       used[o.s].add(id);
+      today.add(id);
       (on[id] = on[id] || {})[o.s] = { cat: roleCat[r], group: o.group };
       (inGroup[o.group] = inGroup[o.group] || new Set()).add(id);
       if (o.counts) {
@@ -220,6 +232,11 @@ function buildSchedule(ctx, key, depth, memo) {
           sc -= 10;
           if (sameRoleElsewhere(v)) sc -= 5;
         }
+        (pairsOf[v.id] || []).forEach(p => {
+          if (p.type === 'apart') { if (today.has(p.other)) sc += PAIR_APART; return; }
+          if (today.has(p.other)) sc -= PAIR_TOGETHER;
+          else if (((volById[p.other] || {}).dates || []).some(x => x.indexOf(d + '|') === 0)) sc -= PAIR_TOGETHER_HINT;
+        });
         return sc;
       };
       const pick = [];

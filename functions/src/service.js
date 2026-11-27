@@ -43,7 +43,9 @@ function ctxOf(data, config) {
     Object.assign(sunMode, doc.sunMode || {});
     Object.keys(doc.finals || {}).forEach(c => { confirmed[m + '|' + c] = doc.finals[c]; });
   });
-  return { cats, roles, vols, events, confirmed, overrides, sunMode, serviceTimes: config.SERVICE_TIMES };
+  const volIds = new Set(vols.map(v => v.id));
+  const pairs = (data.pairs || []).filter(p => volIds.has(p.a) && volIds.has(p.b));
+  return { cats, roles, vols, events, confirmed, overrides, sunMode, pairs, serviceTimes: config.SERVICE_TIMES };
 }
 
 const adminOf = u => (u && u.admin && (u.admin.all || (u.admin.cats || []).length) ? { all: !!u.admin.all, cats: u.admin.all ? [] : (u.admin.cats || []) } : null);
@@ -133,6 +135,8 @@ async function view(deps, auth, q) {
           return { kakaoId: x.kakaoId, nickname: x.nickname || '', volName: vol ? vol.name : '', admin: adminOf(x), lastLogin: x.lastLogin || '', me: x.kakaoId === auth.kakaoId };
         }).sort((a, b) => (b.admin ? 1 : 0) - (a.admin ? 1 : 0) || (a.volName || a.nickname).localeCompare(b.volName || b.nickname, 'ko'));
       }
+      // 관리 탭: 함께/따로 규칙 (팀 담당자는 자기 팀 사람끼리 규칙만)
+      v.pairs = ctx.pairs.filter(p => canPair(ctx, admin, [p.a, p.b])).map(p => ({ id: p.id, a: p.a, b: p.b, type: p.type }));
       // 관리 탭: 내가 관리하는 공지, 알림 켠 봉사자 수
       const cats = L.editableCats(ctx, admin);
       v.noticesAdmin = Object.values(data.notices).filter(n => canEditNotice(admin, cats, n.target))
@@ -303,7 +307,37 @@ ADMIN.saveDates = (tx, ctx, admin, b, month) => {
 
 ADMIN.deleteVolunteer = (tx, ctx, admin, b) => {
   if (!admin.all) fail('봉사자 삭제는 전체 관리자만 할 수 있어요. 팀에서 빼려면 역할을 모두 해제하고 저장하세요.', 'forbidden');
-  if (tx.data.vols[String(b.id)]) tx.delVol(String(b.id));
+  const id = String(b.id);
+  if (tx.data.vols[id]) tx.delVol(id);
+  const left = (tx.data.pairs || []).filter(p => p.a !== id && p.b !== id);
+  if (left.length !== (tx.data.pairs || []).length) tx.setPairs(left);
+};
+
+/* ---------- 함께/따로 배정 규칙 ---------- */
+// 팀 담당자는 두 사람 모두 자기 팀(역할)에 속할 때만 정할 수 있어요.
+function canPair(ctx, admin, ids) {
+  if (admin.all) return true;
+  const cats = L.editableCats(ctx, admin);
+  return ids.every(id => {
+    const v = ctx.vols.find(x => x.id === id);
+    return v && v.roles.some(r => cats.indexOf(roleCatOf(ctx, r)) >= 0);
+  });
+}
+ADMIN.savePair = (tx, ctx, admin, b) => {
+  const a = String(b.a || ''), c = String(b.b || ''), type = String(b.type || '');
+  if (['together', 'apart'].indexOf(type) < 0) fail('규칙 종류를 골라 주세요.');
+  if (!a || !c || a === c) fail('서로 다른 두 사람을 골라 주세요.');
+  if (!tx.data.vols[a] || !tx.data.vols[c]) fail('봉사자를 찾을 수 없어요. 새로고침해 주세요.', 'not_found');
+  if (!canPair(ctx, admin, [a, c])) fail('내가 맡은 팀의 봉사자끼리만 규칙을 정할 수 있어요.', 'forbidden');
+  const rest = (tx.data.pairs || []).filter(p => !((p.a === a && p.b === c) || (p.a === c && p.b === a)));
+  if (rest.filter(p => p.a === a || p.b === a).length >= 10) fail('한 사람에게 규칙은 10개까지 정할 수 있어요.');
+  tx.setPairs(rest.concat([{ id: newId(6).toLowerCase(), a, b: c, type }]));
+};
+ADMIN.deletePair = (tx, ctx, admin, b) => {
+  const p = (tx.data.pairs || []).find(x => x.id === String(b.id || ''));
+  if (!p) fail('규칙을 찾을 수 없어요. 새로고침해 주세요.', 'not_found');
+  if (!canPair(ctx, admin, [p.a, p.b].filter(id => tx.data.vols[id]))) fail('이 규칙은 지울 수 없어요.', 'forbidden');
+  tx.setPairs(tx.data.pairs.filter(x => x.id !== p.id));
 };
 
 ADMIN.saveRoles = (tx, ctx, admin, b) => {

@@ -547,5 +547,53 @@ const L = require('../functions/src/logic');
     ok(pv.push.prefs.input === true && pv.push.inputHour === 14, 'input pref and hour in view');
   }
 
+  /* ---------- 함께/따로 배정 규칙 ---------- */
+  {
+    const S13 = makeServer({ kakaoUsers });
+    const su = await S13.login('c1'), team = await S13.login('c3');
+    const post = (who, path, body) => S13.call('POST', path, { cookie: who.cookie, body: Object.assign({ month: M }, body) });
+    await post(su, '/api/setup', { code: 'SETUP-123' });
+    await post(su, '/api/admin/setAdmin', { kakaoId: '1003', admin: { cats: ['찬양팀'] } });
+    for (const [n, r] of [['남편', '음향'], ['음향2', '음향'], ['아내', '인도'], ['인도2', '인도'], ['싱어1', '싱어']]) await post(su, '/api/admin/saveVolunteer', { name: n, roles: [r] });
+    let v = (await S13.call('GET', '/api/view?month=' + M, { cookie: su.cookie })).json;
+    const id = n => v.vols.find(x => x.name === n).id;
+    // 방송팀은 하루 한 부만 서므로, 음향 두 사람은 1부만 가능하게 해서 주마다 한 명씩 서게 합니다.
+    for (const n of ['남편', '음향2']) await post(su, '/api/admin/saveDates', { id: id(n), dates: dec.map(d => d + '|1') });
+    for (const n of ['아내', '인도2']) await post(su, '/api/admin/saveDates', { id: id(n), dates: dec.flatMap(both) });
+    const days = (vw, n) => dec.filter(d => Object.values(vw.schedule.slots[d]).some(svc => Object.values(svc).some(ps => ps.some(p => p.name === n))));
+    v = (await S13.call('GET', '/api/view?month=' + M, { cookie: su.cookie })).json;
+    let r = await post(team, '/api/admin/savePair', { a: id('남편'), b: id('아내'), type: 'together' });
+    ok(r.status === 403, 'team admin cannot pair across teams');
+    r = await post(team, '/api/admin/savePair', { a: id('아내'), b: id('인도2'), type: 'apart' });
+    ok(r.status === 200, 'team admin pairs own team members');
+    await post(team, '/api/admin/deletePair', { id: r.json.pairs[0].id });
+    r = await post(su, '/api/admin/savePair', { a: id('남편'), b: id('남편'), type: 'together' });
+    ok(r.status === 400, 'pair needs two different people');
+
+    r = await post(su, '/api/admin/savePair', { a: id('남편'), b: id('아내'), type: 'together' });
+    v = r.json;
+    ok(v.pairs.length === 1 && v.pairs[0].type === 'together', 'together rule saved');
+    ok(days(v, '남편').join() === days(v, '아내').join() && days(v, '남편').length >= 1 && days(v, '남편').length < 4, 'together: same days, still shared fairly');
+    ok((await S13.call('GET', '/api/view?month=' + M, { cookie: team.cookie })).json.pairs.length === 0, 'team admin does not see cross-team rule');
+
+    // 같은 두 사람의 규칙은 바꾸면 덮어씀
+    r = await post(su, '/api/admin/savePair', { a: id('아내'), b: id('남편'), type: 'apart' });
+    v = r.json;
+    ok(v.pairs.length === 1 && v.pairs[0].type === 'apart', 'changing type replaces rule');
+    ok(!days(v, '남편').some(d => days(v, '아내').includes(d)), 'apart: never on the same day when others can serve');
+    // 대신 설 사람이 없으면 피하기보다 자리를 채움
+    await post(su, '/api/admin/saveDates', { id: id('음향2'), dates: [] });
+    await post(su, '/api/admin/saveDates', { id: id('인도2'), dates: [] });
+    v = (await S13.call('GET', '/api/view?month=' + M, { cookie: su.cookie })).json;
+    ok(days(v, '남편').length === 4 && days(v, '아내').length === 4, 'apart yields when nobody else is available');
+    // 봉사자 삭제 → 규칙도 삭제
+    r = await post(su, '/api/admin/deleteVolunteer', { id: id('아내') });
+    ok(r.json.pairs.length === 0 && (S13.adapter.docs['config/main'].pairs || []).length === 0, 'deleting volunteer removes rules');
+    // 역할 저장해도 규칙은 남음
+    await post(su, '/api/admin/savePair', { a: id('남편'), b: id('음향2'), type: 'apart' });
+    await post(su, '/api/admin/saveRoles', { cat: '방송팀', roles: [{ name: '음향', count: 1 }, { name: '자막', count: 1 }, { name: '영상 송출', count: 1 }] });
+    ok(S13.adapter.docs['config/main'].pairs.length === 1, 'saving roles keeps rules');
+  }
+
   summary();
 })().catch(e => { console.error(e); process.exitCode = 1; });
