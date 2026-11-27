@@ -352,8 +352,8 @@ const L = require('../functions/src/logic');
     let v7 = (await S7.call('GET', '/api/view?month=' + M, { cookie: su.cookie })).json;
     await post(su, '/api/admin/saveDates', { id: v7.vols.find(x => x.name === '못감').id, dates: [] }); // 0회로 저장 = 입력한 것
     S7.push.sent.length = 0;
-    const rm = await require('../functions/src/service').remindMissing(S7.env.deps, new Date('2026-11-20T01:00:00Z'));
-    ok(rm.month === M && rm.missing.join() === '안넣음' && S7.push.sent.length === 1 && S7.push.sent[0].title === '12월 일정 미입력 1명', 'reminder lists only volunteers who never saved next month');
+    const rm = await require('../functions/src/service').remindInput(S7.env.deps, new Date('2026-12-03T05:00:00Z')); // 12/3(목) 14시
+    ok(rm.kind === 'reminder' && rm.month === M && rm.missing.join() === '안넣음' && S7.push.sent.length === 1 && S7.push.sent[0].title === '12월 일정 미입력 1명', 'Thursday: admin gets list of volunteers who never saved next month');
   }
   {
     const S8 = makeServer({ kakaoUsers, noPush: true });
@@ -510,6 +510,41 @@ const L = require('../functions/src/logic');
     ok(sv.pushStats.app === 1 && sv.pushStats.total === 2 && sv.vols.find(x => x.name === '앱씀').app === true && sv.vols.find(x => x.name === '앱안씀').app === false, 'admin sees who installed the app');
     const pv = (await S11.call('GET', '/api/view?month=' + M, { cookie: vb.cookie })).json;
     ok(pv.vols.every(x => x.app === undefined), 'install info hidden from volunteers');
+  }
+
+  /* ---------- 다음 달 일정 입력 알림 (마지막 주 월요일 · 목요일) ---------- */
+  {
+    const SS = require('../functions/src/service');
+    const P = d => JSON.stringify(SS.inputPlan(d));
+    ok(P('2026-11-30') === JSON.stringify({ kind: 'notice', month: '2026-12', due: '2026-12-03' }), 'last Monday of Nov → notice for Dec, due Thu 12/3');
+    ok(P('2026-12-03') === JSON.stringify({ kind: 'reminder', month: '2026-12', due: '2026-12-03' }), 'Thursday after last Monday (next month) → reminder for Dec');
+    ok(P('2026-11-23') === 'null' && P('2026-11-26') === 'null' && P('2026-12-01') === 'null', 'other days do nothing');
+    ok(SS.inputPlan('2026-12-28').kind === 'notice' && SS.inputPlan('2026-12-28').month === '2027-01' && SS.inputPlan('2026-12-31').kind === 'reminder', 'December → January across the year');
+
+    const S12 = makeServer({ kakaoUsers });
+    const su = await S12.login('c1'), va = await S12.login('c4'), vb = await S12.login('c5'), vc = await S12.login('c6');
+    const post = (who, path, body) => S12.call('POST', path, { cookie: who.cookie, body: Object.assign({ month: M }, body) });
+    const SUB = n => ({ endpoint: 'https://fcm.googleapis.com/fcm/send/i' + n, keys: { p256dh: 'P' + n, auth: 'A' + n } });
+    await post(su, '/api/setup', { code: 'SETUP-123' });
+    // 11월에 가입해서 12월은 아직 안 넣은 상태
+    for (const [w, n, r] of [[va, '가', '음향'], [vb, '나', '인도'], [vc, '다', '드럼']]) await post(w, '/api/mine/save', { month: '2026-11', name: n, roles: [r], dates: [], touched: ['2026-11'] });
+    for (const [w, n] of [[su, 1], [va, 4], [vb, 5], [vc, 6]]) await post(w, '/api/push/subscribe', { subscription: SUB(n) });
+    await post(vc, '/api/push/prefs', { prefs: { input: false } });
+    S12.push.sent.length = 0;
+    let r = await SS.remindInput(S12.env.deps, new Date('2026-11-30T05:00:00Z')); // 11/30(월) 14시
+    ok(r.kind === 'notice' && r.month === M && r.sent === 2 && S12.push.sent.map(x => x.endpoint.slice(-2)).sort().join() === 'i4,i5', 'Monday notice to volunteers (pref respected), not admins');
+    ok(S12.push.sent[0].title === '12월 봉사 일정 입력 안내' && S12.push.sent[0].body.includes('목요일(12/3)까지') && S12.push.sent[0].url === '/?tab=input&month=' + M, 'notice text');
+    // '가'는 수요일에 입력, '나'는 안 함
+    await post(va, '/api/mine/save', { name: '가', roles: ['음향'], dates: both(dec[0]), touched: [M] });
+    S12.push.sent.length = 0;
+    r = await SS.remindInput(S12.env.deps, new Date('2026-12-03T05:00:00Z'));
+    const ends = S12.push.sent.map(x => x.endpoint.slice(-2) + ':' + x.title);
+    ok(r.kind === 'reminder' && r.missing.join() === '나,다' && ends.includes('i5:12월 봉사 일정을 기다리고 있어요') && ends.includes('i1:12월 일정 미입력 2명') && ends.length === 2, 'Thursday reminder only to those still missing, plus admin list');
+    S12.push.sent.length = 0;
+    r = await SS.remindInput(S12.env.deps, new Date('2026-12-02T05:00:00Z'));
+    ok(r.kind === null && S12.push.sent.length === 0, 'Wednesday sends nothing');
+    const pv = (await S12.call('GET', '/api/view?month=' + M, { cookie: vb.cookie })).json;
+    ok(pv.push.prefs.input === true && pv.push.inputHour === 14, 'input pref and hour in view');
   }
 
   summary();

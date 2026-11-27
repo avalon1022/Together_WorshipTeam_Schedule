@@ -91,11 +91,12 @@ exports.remindDuty = onSchedule(
   },
 );
 
-// 미입력자 알림: 매달 config.REMIND 날짜·시각(서울)에 실행
+// 다음 달 일정 입력 알림: 매일 config.INPUT_REMIND 시각(서울)에 실행하고, 마지막 주 월요일·목요일에만 보냅니다.
+// (함수 이름은 예전 그대로 둡니다. 이름을 바꾸면 배포 때 옛 함수 삭제 확인이 필요해요.)
 exports.remindMissing = onSchedule(
-  { schedule: `0 ${config.REMIND.hour} ${config.REMIND.day} * *`, timeZone: 'Asia/Seoul', region: config.REGION, secrets: [VAPID_PRIVATE_KEY], memory: '256MiB' },
+  { schedule: `0 ${config.INPUT_REMIND.hour} * * *`, timeZone: 'Asia/Seoul', region: config.REGION, secrets: [VAPID_PRIVATE_KEY], memory: '256MiB' },
   async () => {
-    const r = await S.remindMissing({ store, config, push: getPush() });
-    console.log('미입력자 알림', r.month, r.missing.length + '명', r.sent + '대 발송');
+    const r = await S.remindInput({ store, config, push: getPush() });
+    if (r.kind) console.log('일정 입력 알림', r.kind, r.month, '미입력 ' + r.missing.length + '명', r.sent + '대 발송');
   },
 );

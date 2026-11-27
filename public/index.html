@@ -702,10 +702,10 @@ function pushCardHtml(){
   else if(state.pushLocal==="unsupported")body=`<p>이 브라우저는 푸시 알림을 지원하지 않아요. 휴대폰의 Chrome이나 홈 화면 앱에서 열어 주세요.</p>`;
   else if(state.pushLocal==="denied")body=`<p>이 기기에서 알림이 차단돼 있어요. 휴대폰 설정(또는 주소창의 자물쇠 → 권한)에서 이 앱의 알림을 허용한 뒤 다시 와 주세요.</p>`;
   else if(state.pushLocal==="on")body=`<p><b>이 기기에서 알림을 받고 있어요.</b> 받을 알림을 골라 주세요.</p>
-    <div class="prefs">${[["duty",`봉사 전날 (저녁 ${P.dutyHour}시)`],["notice","공지"],...(master?[["admin","관리자 소식"]]:[])].map(([k,l])=>`<button class="chip" data-pref="${k}" aria-pressed="${!!P.prefs[k]}">${l}</button>`).join("")}</div>
-    ${master?`<p class="hint">관리자 소식: 봉사자 가입·일정 입력, 다른 관리자의 확정, 매달 ${P.remindDay}일 미입력자</p>`:""}
+    <div class="prefs">${[["duty",`봉사 전날 (저녁 ${P.dutyHour}시)`],["input","다음 달 일정 입력 안내"],["notice","공지"],...(master?[["admin","관리자 소식"]]:[])].map(([k,l])=>`<button class="chip" data-pref="${k}" aria-pressed="${!!P.prefs[k]}">${l}</button>`).join("")}</div>
+    <p class="hint">다음 달 일정 입력 안내: 매달 마지막 주 월요일 ${P.inputHour>12?"오후 "+(P.inputHour-12):"오전 "+P.inputHour}시, 그 주 목요일까지 입력하지 않았으면 목요일에 한 번 더${master?" · 관리자 소식: 봉사자 가입·일정 입력, 다른 관리자의 확정, 마지막 주 목요일 미입력자 명단":""}</p>
     <div class="row"><button class="btn ghost" id="pushTest">시험 알림 보내기</button><button class="btn ghost" id="pushOff">이 기기 알림 끄기</button></div>`;
-  else body=`<p>봉사 전날 저녁 ${P.dutyHour}시에 내 봉사를 알려 드리고, 새 공지도 바로 알려 드려요.${master?" 관리자 소식(가입·일정 입력·확정·미입력자)도 받을 수 있어요.":""}</p>
+  else body=`<p>봉사 전날 저녁 ${P.dutyHour}시에 내 봉사를, 월말에는 다음 달 일정 입력을 알려 드리고, 새 공지도 바로 알려 드려요.${master?" 관리자 소식(가입·일정 입력·확정·미입력자)도 받을 수 있어요.":""}</p>
     <div class="row"><button class="btn" id="pushOn" ${state.pushLocal?"":"disabled"}>이 기기에서 알림 받기</button></div>`;
   return `<section class="panel" style="margin-top:20px">
     <h2>알림 받기</h2>${body}

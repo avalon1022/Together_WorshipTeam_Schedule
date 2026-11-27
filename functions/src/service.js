@@ -121,7 +121,7 @@ async function view(deps, auth, q) {
       devices: Object.values(data.push).filter(s => s.kakaoId === auth.kakaoId).length,
       canSubscribe: !!(myVol || admin),
       prefs: prefsOf(u),
-      remindDay: (deps.config.REMIND || {}).day || 20,
+      inputHour: (deps.config.INPUT_REMIND || {}).hour || 14,
       dutyHour: (deps.config.DUTY_REMIND || {}).hour || 20,
     } : null;
     if (admin) {
@@ -586,7 +586,7 @@ function needPushable(data, auth) {
 // 받을 알림 종류 (기본은 모두 켬): duty 봉사 전날, notice 공지, admin 관리자 소식(전체 관리자)
 function prefsOf(u) {
   const p = (u && u.notify) || {};
-  return { duty: p.duty !== false, notice: p.notice !== false, admin: p.admin !== false };
+  return { duty: p.duty !== false, notice: p.notice !== false, input: p.input !== false, admin: p.admin !== false };
 }
 async function pushPrefs(deps, auth, body) {
   needLogin(auth);
@@ -595,7 +595,7 @@ async function pushPrefs(deps, auth, body) {
     const u = tx.data.users[auth.kakaoId];
     if (!u) fail('다시 로그인해 주세요.', 'login_required');
     const cur = prefsOf(u);
-    ['duty', 'notice', 'admin'].forEach(k => { if (typeof b[k] === 'boolean') cur[k] = b[k]; });
+    ['duty', 'notice', 'input', 'admin'].forEach(k => { if (typeof b[k] === 'boolean') cur[k] = b[k]; });
     tx.putUser(Object.assign({}, u, { notify: cur }));
   });
   return view(deps, auth, { month: body.month });
@@ -644,17 +644,43 @@ async function pushTest(deps, auth, body) {
 }
 
 // 매달 정해진 날: 다음 달 일정을 아직 저장하지 않은 봉사자를 알립니다.
-async function remindMissing(deps, now) {
-  const d = new Date((now || new Date()).getTime() + 9 * 3600 * 1000); // 서울 시간
-  const month = L.shiftMonth(d.toISOString().slice(0, 7), 1);
+// 다음 달 일정 입력 알림 일정: 매달 마지막 주 월요일(안내)과 그 주 목요일(다시 알림)
+const ymd = dt => dt.toISOString().slice(0, 10);
+const addDays = (s, n) => { const t = new Date(s + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return ymd(t); };
+const isLastMonday = s => new Date(s + 'T00:00:00Z').getUTCDay() === 1 && addDays(s, 7).slice(0, 7) !== s.slice(0, 7);
+function inputPlan(today) {
+  const dow = new Date(today + 'T00:00:00Z').getUTCDay();
+  if (dow === 1 && isLastMonday(today)) return { kind: 'notice', month: L.shiftMonth(today.slice(0, 7), 1), due: addDays(today, 3) };
+  const mon = addDays(today, -3);
+  if (dow === 4 && isLastMonday(mon)) return { kind: 'reminder', month: L.shiftMonth(mon.slice(0, 7), 1), due: today };
+  return null;
+}
+// 매일 정해진 시각에 실행되고, 마지막 주 월요일·목요일에만 알림을 보냅니다.
+async function remindInput(deps, now) {
+  const today = ymd(new Date((now || new Date()).getTime() + 9 * 3600 * 1000));
+  const plan = inputPlan(today);
+  if (!plan) return { today, kind: null, sent: 0 };
+  const { month, due, kind } = plan;
   const data = await deps.store.read();
-  const missing = Object.values(data.vols)
-    .filter(v => (v.roles || []).length && !(v.dates || []).some(x => x.indexOf(month) === 0) && (v.savedMonths || []).indexOf(month) < 0)
-    .map(v => v.name).sort((a, b) => a.localeCompare(b, 'ko'));
-  if (!missing.length) return { month, missing, sent: 0 };
-  const list = missing.length > 12 ? missing.slice(0, 12).join(', ') + ` 외 ${missing.length - 12}명` : missing.join(', ');
-  const sent = await notifySafe(deps, { title: `${+month.slice(5)}월 일정 미입력 ${missing.length}명`, body: list, url: `/?tab=settings&month=${month}`, tag: 'remind-' + month });
-  return { month, missing, sent };
+  const entered = v => (v.dates || []).some(x => x.indexOf(month) === 0) || (v.savedMonths || []).indexOf(month) >= 0;
+  const missing = Object.values(data.vols).filter(v => (v.roles || []).length && !entered(v))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  const mm = +month.slice(5), dueLabel = `${+due.slice(5, 7)}/${+due.slice(8)}`;
+  let sent = 0;
+  for (const v of missing) {
+    if (!v.kakaoId || !prefsOf(data.users[v.kakaoId]).input) continue;
+    sent += await notifySafe(deps, kind === 'notice'
+      ? { title: `${mm}월 봉사 일정 입력 안내`, body: `${v.name}님, ${mm}월에 봉사할 수 있는 주일을 이번 주 목요일(${dueLabel})까지 입력해 주세요.`, url: `/?tab=input&month=${month}`, tag: 'input-' + month }
+      : { title: `${mm}월 봉사 일정을 기다리고 있어요`, body: `${v.name}님, 아직 ${mm}월 가능 일정이 없어요. 오늘 안에 입력해 주세요. 봉사가 어려우면 아무것도 체크하지 않고 저장하면 돼요.`, url: `/?tab=input&month=${month}`, tag: 'input-' + month },
+    { to: [v.kakaoId] });
+  }
+  // 목요일: 전체 관리자에게 미입력자 명단
+  if (kind === 'reminder' && missing.length) {
+    const names = missing.map(v => v.name);
+    const list = names.length > 12 ? names.slice(0, 12).join(', ') + ` 외 ${names.length - 12}명` : names.join(', ');
+    await notifySafe(deps, { title: `${mm}월 일정 미입력 ${names.length}명`, body: list, url: `/?tab=settings&month=${month}`, tag: 'remind-' + month });
+  }
+  return { today, kind, month, missing: missing.map(v => v.name), sent };
 }
 
 // 매일 저녁: 내일 봉사가 있는 사람에게 알립니다. 확정된 팀의 배정만 봅니다.
@@ -803,4 +829,4 @@ async function syncCalendarSafe(deps, month, cat) {
   catch (e) { return `스케줄은 저장됐지만 구글 캘린더에 반영하지 못했어요: ${e.message}`; }
 }
 
-module.exports = { ctxOf, migrate, view, recordLogin, markApp, linkMine, saveMine, setup, adminAction, syncCalendar, notify, pushSubscribe, pushUnsubscribe, pushTest, pushPrefs, remindMissing, remindDuty, ADMIN };
+module.exports = { ctxOf, migrate, view, recordLogin, markApp, linkMine, saveMine, setup, adminAction, syncCalendar, notify, pushSubscribe, pushUnsubscribe, pushTest, pushPrefs, inputPlan, remindInput, remindDuty, ADMIN };
